@@ -138,7 +138,7 @@ final class LiveSessionTests: XCTestCase {
 
 final class ProtocolTests: XCTestCase {
     func testDecodesClientMessages() {
-        let hello = ClientMessage.decode(#"{"t":"hello","clientId":"c_1","profile":{"nickname":"小明","avatar":{"kind":"emoji","value":"🦁","color":"#2563EB"}}}"#)
+        let hello = ClientMessage.decode(##"{"t":"hello","clientId":"c_1","profile":{"nickname":"小明","avatar":{"kind":"emoji","value":"🦁","color":"#2563EB"}}}"##)
         XCTAssertEqual(hello?.t, "hello")
         XCTAssertEqual(hello?.profile?.nickname, "小明")
         XCTAssertEqual(hello?.profile?.avatar?.value, "🦁")
