@@ -179,18 +179,33 @@ kill "${PROBE_PID}" 2>/dev/null
 stop_app
 
 # ---------------------------------------------------------------------------
-section "5. 壓力測試：${LOAD_CLIENTS} 支手機"
+section "5. 壓力測試：${LOAD_CLIENTS} 支手機，每個人都上傳不同的照片大頭貼"
 if ifconfig lo0 | grep -q "127.0.0.$((LOAD_CLIENTS + 1)) "; then
+  "${PROBE}" photos "${OUT}/photos" "${LOAD_CLIENTS}" || fail "無法產生測試照片"
   launch_app load --start-session || exit 1
   URL="$(session_url)"
+  sleep 3
+  BASELINE_KB="$(ps -o rss= -p "${APP_PID}" | tr -d ' ')"
   ( while kill -0 "${APP_PID}" 2>/dev/null; do ps -o rss=,%cpu= -p "${APP_PID}" >>"${OUT}/resources.txt"; sleep 1; done ) &
   SAMPLER=$!
   node tests/loadtest.mjs --base "${BASE}" --token "${URL##*/}" --clients "${LOAD_CLIENTS}" --duration "${LOAD_SECONDS}" \
-    --out "${OUT}/loadtest.json" || fail "壓力測試"
+    --photos "${OUT}/photos" --out "${OUT}/loadtest.json" &
+  LOAD_PID=$!
+  # 一般互動階段中截圖：畫面上的彈幕各自帶著發送者自己的照片
+  sleep 25
+  shot "22-photo-avatars"
+  wait "${LOAD_PID}" || fail "壓力測試"
   kill "${SAMPLER}" 2>/dev/null
-  awk '{ if ($1 > max) max = $1; cpu += $2; if ($2 > peak) peak = $2; n++ } END {
-    printf "App 資源：記憶體最高 %.1f MB；CPU 平均 %.1f%%、最高 %.1f%%（%d 次取樣）\n", max / 1024, cpu / n, peak, n }' \
+  awk -v base="${BASELINE_KB}" -v clients="${LOAD_CLIENTS}" '{ if ($1 > max) max = $1; cpu += $2; if ($2 > peak) peak = $2; n++ } END {
+    printf "App 資源：記憶體開始 %.1f MB、最高 %.1f MB（增加 %.1f MB，平均每位觀眾 %.0f KB）；CPU 平均 %.1f%%、最高 %.1f%%（%d 次取樣）\n",
+      base / 1024, max / 1024, (max - base) / 1024, (max - base) / clients, cpu / n, peak, n }' \
     "${OUT}/resources.txt" | tee "${OUT}/resources-summary.txt"
+  grep -h "照片大頭貼" "${LOG}" | sed 's/^.*URBAN LIVE: //' | sort -u -t' ' -k2,2n | tail -3 | tee "${OUT}/photo-usage.txt"
+  if grep -q "照片大頭貼 ${LOAD_CLIENTS} 人" "${LOG}"; then
+    pass "${LOAD_CLIENTS} 位觀眾的照片大頭貼全部被 App 接受"
+  else
+    fail "App 沒有接受全部 ${LOAD_CLIENTS} 張照片大頭貼"
+  fi
   stop_app
 else
   echo "⚪️ 沒有 lo0 別名，略過壓力測試"
@@ -200,7 +215,7 @@ reset_defaults
 # ---------------------------------------------------------------------------
 # CI 無法下載 Artifacts 時檢視截圖用：把縮小後的 JPEG 以 base64 印在 log 中
 if [[ "${PRINT_PREVIEWS:-0}" == "1" ]]; then
-  for name in 01-style-glass 02-style-classic 02-style-card 02-profile-standard 02-profile-extraLarge 03-large-qr 04-control-panel 05-compatibility 20-phone 21-acceptance-over-fullscreen; do
+  for name in 01-style-glass 02-style-classic 02-style-card 02-profile-standard 02-profile-extraLarge 03-large-qr 04-control-panel 05-compatibility 20-phone 21-acceptance-over-fullscreen 22-photo-avatars; do
     [[ -f "${OUT}/${name}.png" ]] || continue
     sips -s format jpeg -s formatOptions 65 -Z 1100 "${OUT}/${name}.png" --out "${OUT}/preview-${name}.jpg" >/dev/null 2>&1 || continue
     echo "=====BEGIN PREVIEW ${name}====="

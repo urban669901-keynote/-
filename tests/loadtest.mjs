@@ -1,17 +1,36 @@
 // 壓力測試：模擬 N 支手機（每支不同 IP）同時連線、同時發送、持續發送。
 //   node loadtest.mjs --base http://127.0.0.1:8765 --token ABCD2345 --clients 200 --duration 60 --out result.json
+// --photos <資料夾>：每支手機用資料夾裡不同的 JPEG 當照片大頭貼（模擬每個人都上傳自己的照片）
 // 需要 lo0 別名 127.0.0.2 ～ 127.0.0.(N+1)：
 //   for i in $(seq 2 201); do sudo ifconfig lo0 alias 127.0.0.$i up; done
 import fs from 'node:fs';
+import path from 'node:path';
 import { Phone, parseArgs, percentile, sleep } from './lib.mjs';
 
-const args = parseArgs({ base: 'http://127.0.0.1:8765', clients: '200', duration: '60', normal: '45', out: '' });
+const args = parseArgs({ base: 'http://127.0.0.1:8765', clients: '200', duration: '60', normal: '45', out: '', photos: '' });
 if (!args.token) { console.error('需要 --token'); process.exit(2); }
 const clientCount = Number(args.clients);
 const duration = Number(args.duration) * 1000;
 const texts = ['URBAN 今天衝三件 🔥', '早安 ☀️', '加油 💪', '👏👏👏', '這個數字太強了', '收到！', '+1 👍', '🎉', '衝衝衝 🚀', '辛苦了 ☕️'];
 
 const summary = { clients: clientCount, durationSeconds: duration / 1000 };
+
+// 照片大頭貼：與手機網頁上傳的格式相同（data URL）
+const photos = args.photos
+  ? fs.readdirSync(args.photos).filter((name) => name.endsWith('.jpg')).sort()
+    .map((name) => `data:image/jpeg;base64,${fs.readFileSync(path.join(args.photos, name)).toString('base64')}`)
+  : [];
+if (args.photos && photos.length === 0) { console.error(`${args.photos} 裡沒有 JPEG`); process.exit(2); }
+const emojis = ['🦁', '🐯', '🐼', '🐰'];
+const avatarFor = (i) => (photos.length
+  ? { kind: 'photo', data: photos[i % photos.length] }
+  : { kind: 'emoji', value: emojis[i % emojis.length], color: '#2563EB' });
+if (photos.length) {
+  const used = Array.from({ length: clientCount }, (_, i) => photos[i % photos.length]);
+  const bytes = used.reduce((sum, url) => sum + url.length, 0);
+  summary.photoAvatars = { distinct: Math.min(photos.length, clientCount), averageUploadKB: Math.round(bytes / used.length / 1024 * 10) / 10 };
+  console.log(`▶ 照片大頭貼：${summary.photoAvatars.distinct} 張不同照片，每人上傳平均 ${summary.photoAvatars.averageUploadKB} KB（base64）`);
+}
 const stats = (values) => ({ count: values.length, p50: percentile(values, 50), p95: percentile(values, 95), p99: percentile(values, 99), max: values.length ? Math.round(Math.max(...values) * 10) / 10 : null });
 const tally = (results) => results.reduce((acc, r) => {
   const key = r.ack ? (r.ack.ok ? 'accepted' : r.ack.code) : 'no_ack';
@@ -23,7 +42,7 @@ const tally = (results) => results.reduce((acc, r) => {
 console.log(`▶ ${clientCount} 支手機同時連線…`);
 const phones = Array.from({ length: clientCount }, (_, i) => new Phone({
   base: args.base, token: args.token, localAddress: `127.0.0.${2 + i}`,
-  nickname: `測試員${i + 1}`, avatar: { kind: 'emoji', value: ['🦁', '🐯', '🐼', '🐰'][i % 4], color: '#2563EB' },
+  nickname: `測試員${i + 1}`, avatar: avatarFor(i),
 }));
 const connectStart = performance.now();
 const connectResults = await Promise.allSettled(phones.map(async (phone) => {

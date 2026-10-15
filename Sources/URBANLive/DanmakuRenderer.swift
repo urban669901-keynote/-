@@ -652,6 +652,18 @@ enum AvatarFactory {
         }
     }
 
+    /// 只讀檔頭確認照片可用（JPEG / PNG、尺寸合理），不解碼整張圖。
+    static func isUsablePhoto(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(source).map({ $0 as String }),
+              type == "public.jpeg" || type == "public.png",
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = properties[kCGImagePropertyPixelWidth as String] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight as String] as? Int
+        else { return false }
+        return min(width, height) > 8 && max(width, height) <= 4096
+    }
+
     /// 照片：用 ImageIO 直接產生縮圖（不會把大圖完整解碼到記憶體），再裁成正方形。
     /// 直式照片往上裁（人像的臉通常在上半部），避免切到頭。
     static func photoAvatar(_ data: Data) -> CGImage? {

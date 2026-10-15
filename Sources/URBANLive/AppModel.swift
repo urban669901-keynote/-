@@ -28,13 +28,60 @@ struct SenderRecord: Identifiable, Equatable {
     var lastAt: Date
 }
 
+/// 觀眾的大頭貼來源。
+private enum AvatarSource {
+    case none
+    /// Emoji 或暱稱首字：同樣的圖多人共用
+    case shared(CGImage)
+    /// 上傳的照片：只保留手機傳來的壓縮檔（約 20～50 KB），要上螢幕時才解碼
+    case photo(Data)
+}
+
+/// 最近上螢幕的照片大頭貼（已解碼）只留少量；其他人的照片保持壓縮狀態，
+/// 所以 100～200 人都上傳照片時，記憶體只多幾 MB。
+private struct PhotoCache {
+    let capacity: Int
+    private var images: [Int: CGImage] = [:]
+    private var order: [Int] = []
+    var count: Int { images.count }
+
+    init(capacity: Int) {
+        self.capacity = capacity
+    }
+
+    mutating func image(for id: Int, decode: () -> CGImage?) -> CGImage? {
+        if let image = images[id] {
+            order.removeAll { $0 == id }
+            order.append(id)
+            return image
+        }
+        guard let image = decode() else { return nil }
+        images[id] = image
+        order.append(id)
+        while order.count > capacity {
+            images.removeValue(forKey: order.removeFirst())
+        }
+        return image
+    }
+
+    mutating func remove(_ id: Int) {
+        images.removeValue(forKey: id)
+        order.removeAll { $0 == id }
+    }
+
+    mutating func removeAll() {
+        images.removeAll()
+        order.removeAll()
+    }
+}
+
 /// 一支已連線的手機。
 private final class Viewer {
     let id: Int
     let address: String
     var clientId: String?
     var nickname: String?
-    var avatarImage: CGImage?
+    var avatar: AvatarSource = .none
 
     init(id: Int, address: String) {
         self.id = id
@@ -75,6 +122,8 @@ final class AppModel: ObservableObject {
     }
 
     private var gate: ModerationGate
+    private var photoCache = PhotoCache(capacity: 24)
+    private var loggedPhotoCount = 0
     private var viewers: [Int: Viewer] = [:]
     private var counters = LiveStats()
     private var senderMap: [String: SenderRecord] = [:]
@@ -201,6 +250,22 @@ final class AppModel: ObservableObject {
             sendersDirty = false
             senders = senderMap.values.sorted { $0.lastAt > $1.lastAt }
         }
+        logPhotoUsage()
+    }
+
+    /// 照片大頭貼的人數與佔用（壓縮檔總和）有變化時寫進系統紀錄，方便現場排查與壓力測試量測。
+    private func logPhotoUsage() {
+        var count = 0
+        var bytes = 0
+        for viewer in viewers.values {
+            if case let .photo(data) = viewer.avatar {
+                count += 1
+                bytes += data.count
+            }
+        }
+        guard count != loggedPhotoCount else { return }
+        loggedPhotoCount = count
+        NSLog("URBAN LIVE: 照片大頭貼 \(count) 人，壓縮檔共 \(bytes / 1024) KB，已解碼快取 \(photoCache.count) 張")
     }
 
     // MARK: - 場次
@@ -234,6 +299,7 @@ final class AppModel: ObservableObject {
             server.close(id, finalMessage: bye, code: 4000)
         }
         viewers.removeAll()
+        photoCache.removeAll()
         overlay.stage.clearScreen()
         session = nil
         persistSession()
@@ -254,6 +320,7 @@ final class AppModel: ObservableObject {
             server.close(id, finalMessage: bye, code: 4000)
         }
         viewers.removeAll()
+        photoCache.removeAll()
         session = LiveSession.start(duration: settings.sessionHours * 3600)
         persistSession()
         refreshURL()
@@ -466,6 +533,7 @@ final class AppModel: ObservableObject {
 
         case let .closed(id):
             viewers.removeValue(forKey: id)
+            photoCache.remove(id)
         }
     }
 
@@ -501,8 +569,16 @@ final class AppModel: ObservableObject {
             viewer.nickname = nil
             server.send(ServerMessage(t: "profile", ok: false, code: rejection.code, message: rejection.message).json(), to: viewer.id)
         }
-        let avatar = ValidatedAvatar.validate(profile?.avatar, allowPhoto: settings.allowPhotoAvatar)
-        viewer.avatarImage = AvatarFactory.image(for: avatar, nickname: viewer.nickname)
+        let validated = ValidatedAvatar.validate(profile?.avatar, allowPhoto: settings.allowPhotoAvatar)
+        photoCache.remove(viewer.id)
+        if case let .photo(data) = validated, AvatarFactory.isUsablePhoto(data) {
+            viewer.avatar = .photo(data)
+        } else {
+            // 照片無法使用時退回暱稱首字
+            let fallback: ValidatedAvatar
+            if case .photo = validated { fallback = .none } else { fallback = validated }
+            viewer.avatar = AvatarFactory.image(for: fallback, nickname: viewer.nickname).map(AvatarSource.shared) ?? .none
+        }
         if var record = senderMap[viewer.address] {
             record.nickname = viewer.nickname
             senderMap[viewer.address] = record
@@ -537,7 +613,7 @@ final class AppModel: ObservableObject {
                 content: DanmakuContent(
                     text: text,
                     nickname: settings.showNickname ? viewer.nickname : nil,
-                    avatar: settings.showAvatar ? viewer.avatarImage : nil
+                    avatar: avatarImage(for: viewer)
                 ),
                 connectionID: viewer.id
             )
@@ -553,6 +629,22 @@ final class AppModel: ObservableObject {
                 t: "ack", id: messageID, ok: false, code: rejection.code,
                 message: rejection.message, retryAfter: rejection.retryAfter
             ).json(), to: viewer.id)
+        }
+    }
+
+    /// 這位觀眾的彈幕要用的大頭貼。照片在這時才解碼（並留在小型快取裡）。
+    private func avatarImage(for viewer: Viewer) -> CGImage? {
+        guard settings.showAvatar else { return nil }
+        switch viewer.avatar {
+        case .none:
+            return nil
+        case let .shared(image):
+            return image
+        case let .photo(data):
+            // 主持人中途關閉「允許照片大頭貼」時立即生效：改用暱稱首字
+            guard settings.allowPhotoAvatar else { return viewer.nickname.flatMap(AvatarFactory.initialAvatar) }
+            return photoCache.image(for: viewer.id) { AvatarFactory.photoAvatar(data) }
+                ?? viewer.nickname.flatMap(AvatarFactory.initialAvatar)
         }
     }
 

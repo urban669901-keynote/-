@@ -8,6 +8,7 @@
 //   FullscreenProbe show capture         CGDisplayCapture 擷取整個螢幕（舊版 Keynote 的做法）
 //   FullscreenProbe analyze shot.png     分析截圖：紅色 = 測試視窗、藍色膠囊 = 彈幕
 //   FullscreenProbe qr shot.png          解碼截圖中的 QR Code（確認畫面上的 QR Code 真的掃得出來）
+//   FullscreenProbe photos <dir> <N>     產生 N 張彼此不同的 320×320 人像測試照片（JPEG，壓力測試用）
 //
 // analyze 的結束代碼：0 = 彈幕可見、1 = 測試視窗可見但彈幕不可見、2 = 截圖裡看不到測試視窗（無法判斷）
 import AppKit
@@ -163,6 +164,68 @@ func decodeQR(path: String) -> Int32 {
     return features.isEmpty ? 1 : 0
 }
 
+/// 產生彼此不同的人像測試照片：隨機背景、膚色、髮色、衣服顏色，再加上像真實照片的雜訊，
+/// 讓 JPEG 大小接近手機實際上傳的照片（約 20～50 KB），而不是純色圖那種幾 KB。
+func makePhotos(directory: String, count: Int) -> Int32 {
+    try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+    guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return 1 }
+    var generator = SystemRandomNumberGenerator()
+    func random(_ range: ClosedRange<CGFloat>) -> CGFloat { CGFloat.random(in: range, using: &generator) }
+    func color(_ hue: CGFloat, _ saturation: CGFloat, _ brightness: CGFloat) -> CGColor {
+        NSColor(hue: hue, saturation: saturation, brightness: brightness, alpha: 1).cgColor
+    }
+    let side = 320
+    var totalBytes = 0
+    for index in 0..<count {
+        guard let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 1 }
+        let size = CGFloat(side)
+        let backgroundHue = random(0...1)
+        let gradient = CGGradient(colorsSpace: space, colors: [color(backgroundHue, 0.35, 0.95), color(backgroundHue, 0.55, 0.6)] as CFArray, locations: [0, 1])!
+        context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: size), end: CGPoint(x: size, y: 0), options: [])
+        for _ in 0..<18 { // 背景散景
+            context.setFillColor(color(random(0...1), 0.3, 1).copy(alpha: random(0.1...0.35))!)
+            let d = random(20...90)
+            context.fillEllipse(in: CGRect(x: random(-20...size), y: random(-20...size), width: d, height: d))
+        }
+        let skin = color(random(0.04...0.09), random(0.25...0.5), random(0.55...0.95))
+        context.setFillColor(color(random(0...1), random(0.3...0.8), random(0.2...0.7)))      // 衣服
+        context.fillEllipse(in: CGRect(x: 10, y: -150, width: 300, height: 230))
+        context.setFillColor(skin)
+        context.fill(CGRect(x: 135, y: 60, width: 50, height: 50))                             // 脖子
+        let faceWidth = random(105...130)
+        context.fillEllipse(in: CGRect(x: 160 - faceWidth / 2, y: 95, width: faceWidth, height: random(135...160))) // 臉
+        context.setFillColor(color(random(0.02...0.1), random(0.3...0.8), random(0.08...0.5)))  // 頭髮
+        context.fillEllipse(in: CGRect(x: 160 - faceWidth / 2 - 8, y: 175, width: faceWidth + 16, height: random(80...110)))
+        context.setFillColor(color(0, 0, 0.12))                                               // 眼睛
+        context.fillEllipse(in: CGRect(x: 160 - faceWidth * 0.22 - 6, y: 172, width: 12, height: 12))
+        context.fillEllipse(in: CGRect(x: 160 + faceWidth * 0.22 - 6, y: 172, width: 12, height: 12))
+        context.setStrokeColor(color(0.0, 0.5, 0.6))
+        context.setLineWidth(5)
+        context.addArc(center: CGPoint(x: 160, y: 150), radius: 26, startAngle: .pi * 1.15, endAngle: .pi * 1.85, clockwise: false)
+        context.strokePath()
+
+        // 照片雜訊
+        if let data = context.data {
+            let pixels = data.bindMemory(to: UInt8.self, capacity: side * side * 4)
+            for offset in stride(from: 0, to: side * side * 4, by: 4) {
+                let noise = Int.random(in: -14...14, using: &generator)
+                for channel in 0..<3 {
+                    pixels[offset + channel] = UInt8(clamping: Int(pixels[offset + channel]) + noise)
+                }
+            }
+        }
+        guard let image = context.makeImage() else { return 1 }
+        let url = URL(fileURLWithPath: directory).appendingPathComponent(String(format: "photo-%03d.jpg", index))
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil) else { return 1 }
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.86] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return 1 }
+        totalBytes += (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+    }
+    print("已產生 \(count) 張測試照片，平均 \(totalBytes / max(1, count) / 1024) KB")
+    return 0
+}
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 3 else {
     print("用法：FullscreenProbe show <fullscreen|level:N|shielding|capture> [--seconds N]\n      FullscreenProbe analyze <png>\n      FullscreenProbe qr <png>")
@@ -178,6 +241,8 @@ case "analyze":
     exit(analyze(path: arguments[2], minCapsule: option("--min-capsule", 1500), minWhite: option("--min-white", 1500)))
 case "qr":
     exit(decodeQR(path: arguments[2]))
+case "photos":
+    exit(makePhotos(directory: arguments[2], count: arguments.count > 3 ? Int(arguments[3]) ?? 200 : 200))
 case "show":
     var seconds = 8.0
     if let flag = arguments.firstIndex(of: "--seconds"), flag + 1 < arguments.count, let value = Double(arguments[flag + 1]) {
