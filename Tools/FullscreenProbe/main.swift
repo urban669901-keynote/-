@@ -85,7 +85,10 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-func analyze(path: String) -> Int32 {
+/// - Parameters:
+///   - minCapsule / minWhite: 判定「彈幕可見」所需的藍色膠囊與白色文字像素數。
+///     多則彈幕同時在畫面上時用預設值；只有一則時可調低（--min-capsule / --min-white）。
+func analyze(path: String, minCapsule: Int = 1500, minWhite: Int = 1500) -> Int32 {
     guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
           let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
           let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
@@ -139,7 +142,7 @@ func analyze(path: String) -> Int32 {
         print("⚪️ \(summary) → 截圖中看不到測試視窗，無法判斷（可能沒有螢幕錄製權限）")
         return 2
     }
-    if capsule > 1500 && white > 1500 {
+    if capsule > minCapsule && white > minWhite {
         print("✅ \(summary) → 彈幕在全螢幕視窗上方")
         return 0
     }
@@ -168,7 +171,11 @@ guard arguments.count >= 3 else {
 
 switch arguments[1] {
 case "analyze":
-    exit(analyze(path: arguments[2]))
+    func option(_ name: String, _ fallback: Int) -> Int {
+        guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count, let value = Int(arguments[index + 1]) else { return fallback }
+        return value
+    }
+    exit(analyze(path: arguments[2], minCapsule: option("--min-capsule", 1500), minWhite: option("--min-white", 1500)))
 case "qr":
     exit(decodeQR(path: arguments[2]))
 case "show":

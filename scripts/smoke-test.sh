@@ -154,8 +154,11 @@ echo "手機網址（Mac 的區域網路 IP）：${URL}"
 PROBE_PID=$!
 sleep 5
 if node tests/e2e-phone.mjs --url "${URL}" --shot "${OUT}/20-phone.png" | tee "${OUT}/e2e.txt"; then
+  # 等這一則彈幕完整進入畫面再截圖（剛進場時只露出右邊一小段）
+  sleep 2.5
   shot "21-acceptance-over-fullscreen"
-  RESULT="$("${PROBE}" analyze "${OUT}/21-acceptance-over-fullscreen.png")"
+  # 畫面上只有一則彈幕，像素門檻比多則彈幕的情境低
+  RESULT="$("${PROBE}" analyze "${OUT}/21-acceptance-over-fullscreen.png" --min-capsule 1000 --min-white 500)"
   STATUS=$?
   echo "${RESULT}"
   if [[ ${STATUS} -eq 0 ]]; then pass "手機送出的彈幕出現在全螢幕視窗上方"; elif [[ ${STATUS} -eq 1 ]]; then fail "手機彈幕被全螢幕視窗蓋住"; fi
