@@ -4,7 +4,7 @@ import DanmakuCore
 /// 「相容性測試」：60 秒內持續發送測試彈幕，同時記錄螢幕上所有視窗的層級。
 ///
 /// 使用方式：開始測試 → 切到 Keynote / PowerPoint 開始播放 → 看投影畫面上是否出現測試彈幕
-/// → 結束播放回到測試視窗看結果。紀錄檔存在 ~/Library/Logs/URBANDanmaku/，可以拿來回報問題。
+/// → 結束播放回到測試視窗看結果。紀錄檔存在 ~/Library/Logs/URBANLive/，可以拿來回報問題。
 final class CompatibilityTest: ObservableObject {
     static let duration = 60
     static let messageInterval = 2
@@ -33,7 +33,7 @@ final class CompatibilityTest: ObservableObject {
 
     static var logDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/URBANDanmaku", isDirectory: true)
+            .appendingPathComponent("Library/Logs/URBANLive", isDirectory: true)
     }
 
     // MARK: - 取樣（每秒由 WindowLevelMonitor 呼叫）
@@ -140,7 +140,7 @@ final class CompatibilityTest: ObservableObject {
 
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         write([
-            "URBAN 即時彈幕 相容性測試",
+            "URBAN LIVE 相容性測試",
             "App 版本：\(version)",
             "macOS：\(ProcessInfo.processInfo.operatingSystemVersionString)",
             "視窗層級模式：\(mode.title)",

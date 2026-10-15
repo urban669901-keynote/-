@@ -18,10 +18,24 @@ public struct HTTPRequest: Equatable {
     }
 }
 
+extension HTTPRequest {
+    /// 取得 query string 參數（例如 `/ws?s=ABCD` 的 `s`）。
+    public func queryValue(_ name: String) -> String? {
+        guard let query else { return nil }
+        for pair in query.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2, parts[0] == name else { continue }
+            return String(parts[1]).removingPercentEncoding ?? String(parts[1])
+        }
+        return nil
+    }
+}
+
 public enum HTTPParseResult: Equatable {
     /// 資料還沒收完，繼續讀。
     case incomplete
-    case complete(HTTPRequest)
+    /// `consumed`：這個請求用掉的位元組數（之後的資料屬於下一個協定，例如 WebSocket 訊框）。
+    case complete(HTTPRequest, consumed: Int)
     case invalid(String)
     case tooLarge
 }
@@ -88,7 +102,7 @@ public enum HTTPRequestParser {
             query: query,
             headers: headers,
             body: body
-        ))
+        ), consumed: bodyStart + contentLength - data.startIndex)
     }
 }
 
@@ -136,8 +150,10 @@ public struct HTTPResponse {
         case 200: return "OK"
         case 204: return "No Content"
         case 400: return "Bad Request"
+        case 403: return "Forbidden"
         case 404: return "Not Found"
         case 405: return "Method Not Allowed"
+        case 410: return "Gone"
         case 413: return "Payload Too Large"
         case 423: return "Locked"
         case 429: return "Too Many Requests"

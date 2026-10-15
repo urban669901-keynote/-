@@ -3,7 +3,8 @@ import Foundation
 /// 把手機送來的文字整理成可安全顯示的一行彈幕。
 public enum MessageSanitizer {
     /// 以「看得到的字元」（grapheme）計算，一個 Emoji（含膚色、家庭組合）算 1 個字。
-    public static let defaultMaxLength = 40
+    public static let defaultMaxLength = 25
+    public static let defaultNicknameMaxLength = 10
 
     /// 每個字元最多保留的附加符號數，避免「Zalgo」亂碼把行高撐爆。
     static let maxMarksPerCharacter = 2
@@ -35,11 +36,18 @@ public enum MessageSanitizer {
         var result = ""
         var count = 0
         for character in collapsed {
-            guard count < maxLength else { break }
+            guard count < max(1, maxLength) else { break }
             result.append(limitMarks(character))
             count += 1
         }
-        return result.isEmpty ? nil : result
+        let trimmed = result.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// 暱稱：同樣的清理規則，長度較短。
+    public static func sanitizeNickname(_ raw: String?, maxLength: Int = defaultNicknameMaxLength) -> String? {
+        guard let raw else { return nil }
+        return sanitize(raw, maxLength: maxLength)
     }
 
     private static func limitMarks(_ character: Character) -> String {

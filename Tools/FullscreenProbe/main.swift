@@ -7,9 +7,11 @@
 //   FullscreenProbe show shielding       一般 App 用 Shielding 層級蓋滿螢幕
 //   FullscreenProbe show capture         CGDisplayCapture 擷取整個螢幕（舊版 Keynote 的做法）
 //   FullscreenProbe analyze shot.png     分析截圖：紅色 = 測試視窗、藍色膠囊 = 彈幕
+//   FullscreenProbe qr shot.png          解碼截圖中的 QR Code（確認畫面上的 QR Code 真的掃得出來）
 //
 // analyze 的結束代碼：0 = 彈幕可見、1 = 測試視窗可見但彈幕不可見、2 = 截圖裡看不到測試視窗（無法判斷）
 import AppKit
+import CoreImage
 import ImageIO
 
 let probeColor = NSColor(srgbRed: 0.86, green: 0.10, blue: 0.10, alpha: 1)
@@ -145,15 +147,30 @@ func analyze(path: String) -> Int32 {
     return 1
 }
 
+func decodeQR(path: String) -> Int32 {
+    guard let image = CIImage(contentsOf: URL(fileURLWithPath: path)) else {
+        print("無法讀取截圖：\(path)")
+        return 2
+    }
+    let detector = CIDetector(ofType: CIDetectorTypeQRCode, context: nil, options: [CIDetectorAccuracy: CIDetectorAccuracyHigh])
+    let features = detector?.features(in: image).compactMap { $0 as? CIQRCodeFeature } ?? []
+    for feature in features {
+        print(feature.messageString ?? "")
+    }
+    return features.isEmpty ? 1 : 0
+}
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 3 else {
-    print("用法：FullscreenProbe show <fullscreen|level:N|shielding|capture> [--seconds N]\n      FullscreenProbe analyze <png>")
+    print("用法：FullscreenProbe show <fullscreen|level:N|shielding|capture> [--seconds N]\n      FullscreenProbe analyze <png>\n      FullscreenProbe qr <png>")
     exit(64)
 }
 
 switch arguments[1] {
 case "analyze":
     exit(analyze(path: arguments[2]))
+case "qr":
+    exit(decodeQR(path: arguments[2]))
 case "show":
     var seconds = 8.0
     if let flag = arguments.firstIndex(of: "--seconds"), flag + 1 < arguments.count, let value = Double(arguments[flag + 1]) {

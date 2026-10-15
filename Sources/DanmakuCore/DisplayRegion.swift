@@ -1,5 +1,32 @@
 import Foundation
 
+/// 彈幕顯示區域模式。
+public enum DisplayArea: String, CaseIterable, Codable {
+    /// 整個畫面
+    case full
+    /// 上方約 30%
+    case top
+    /// 下方約 30%（預設）
+    case bottom
+
+    public var title: String {
+        switch self {
+        case .full: return "全螢幕"
+        case .top: return "上方區域"
+        case .bottom: return "下方區域"
+        }
+    }
+
+    /// 上下各保留 2%，避免投影機 / 電視過掃描（overscan）把彈幕切掉。
+    public var region: DisplayRegion {
+        switch self {
+        case .full: return DisplayRegion(top: 0.02, bottom: 0.98)
+        case .top: return DisplayRegion(top: 0.02, bottom: 0.32)
+        case .bottom: return DisplayRegion(top: 0.68, bottom: 0.98)
+        }
+    }
+}
+
 /// 彈幕可以出現的垂直範圍，以螢幕高度的比例表示（0 = 最上方，1 = 最下方）。
 public struct DisplayRegion: Equatable, Codable {
     public static let minimumSpan = 0.1
@@ -18,22 +45,7 @@ public struct DisplayRegion: Equatable, Codable {
         self.bottom = bottom
     }
 
-    public struct Preset: Equatable {
-        public var name: String
-        public var region: DisplayRegion
-    }
-
-    public static let presets: [Preset] = [
-        Preset(name: "上方 1/3", region: DisplayRegion(top: 0, bottom: 1.0 / 3.0)),
-        Preset(name: "上半部", region: DisplayRegion(top: 0, bottom: 0.5)),
-        Preset(name: "上方 2/3", region: DisplayRegion(top: 0, bottom: 2.0 / 3.0)),
-        Preset(name: "全畫面", region: DisplayRegion(top: 0, bottom: 1)),
-        Preset(name: "下半部", region: DisplayRegion(top: 0.5, bottom: 1)),
-    ]
-
-    public static let `default` = DisplayRegion(top: 0, bottom: 2.0 / 3.0)
-
-    /// 換算成「距離畫面頂端」的像素範圍。`topInset` 是瀏海等不可用區域。
+    /// 換算成「距離畫面頂端」的範圍。`topInset` 是瀏海等不可用區域。
     public func span(stageHeight: Double, topInset: Double = 0) -> (top: Double, bottom: Double) {
         let usable = max(0, stageHeight - topInset)
         return (topInset + top * usable, topInset + bottom * usable)
@@ -45,5 +57,16 @@ public struct DisplayRegion: Equatable, Codable {
         let height = range.bottom - range.top
         guard laneHeight + laneSpacing > 0 else { return 1 }
         return max(1, Int((height + laneSpacing) / (laneHeight + laneSpacing)))
+    }
+}
+
+/// 以 1920×1080 為設計基準：設定的字體大小是「在 1080p 畫面上的像素」，
+/// 實際點數依螢幕高度等比例換算，所以不同解析度投影出來的比例一致。
+public enum ReferenceScale {
+    public static let referenceHeight = 1080.0
+
+    public static func points(forReferencePixels pixels: Double, screenHeightPoints: Double) -> Double {
+        guard screenHeightPoints > 0 else { return pixels }
+        return pixels * screenHeightPoints / referenceHeight
     }
 }

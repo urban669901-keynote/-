@@ -2,17 +2,22 @@ import AppKit
 import Combine
 import DanmakuCore
 
-/// 管理彈幕 Overlay 視窗：位置（跟著主螢幕）、層級、彈幕舞台與 QR Code 卡片。
+/// 管理彈幕 Overlay 視窗：位置（跟著主螢幕）、層級、彈幕舞台與 QR Code。
 final class OverlayController {
     private let settings: Settings
     private let panel: OverlayPanel
     private let rootView = NSView()
-    private let stage = DanmakuStageView(frame: .zero)
+    let stage = DanmakuStageView(frame: .zero)
     private let qrCard = QRCardView(frame: .zero)
+    private let largeQR = LargeQRView(frame: .zero)
     private var cancellables = Set<AnyCancellable>()
 
     private(set) var isVisible = false
     private(set) var level: Int = NSWindow.Level.screenSaver.rawValue
+    private var url: String?
+    var largeQRVisible = false {
+        didSet { layoutQR() }
+    }
 
     init(settings: Settings) {
         self.settings = settings
@@ -24,31 +29,32 @@ final class OverlayController {
         rootView.autoresizingMask = [.width, .height]
         stage.frame = rootView.bounds
         stage.autoresizingMask = [.width, .height]
+        largeQR.frame = rootView.bounds
+        largeQR.autoresizingMask = [.width, .height]
         rootView.addSubview(stage)
-        rootView.addSubview(qrCard) // QR 卡片在彈幕上方，確保隨時掃得到
+        rootView.addSubview(qrCard) // QR Code 在彈幕上方，隨時掃得到
+        rootView.addSubview(largeQR)
         panel.contentView = rootView
 
         settings.objectWillChange
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.applySettings() }
+            .sink { [weak self] _ in
+                // objectWillChange 在值改變「之前」送出，延到下一輪再讀新值
+                DispatchQueue.main.async { self?.applySettings() }
+            }
             .store(in: &cancellables)
 
         NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            // AirPlay 鏡像開始/結束、「為 Apple TV 最佳化」切換解析度時都會觸發
+            // AirPlay 鏡像開始 / 結束、為 Apple TV 調整解析度時都會觸發
             self?.fitToScreen()
         }
         NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.activeSpaceDidChangeNotification,
-            object: nil,
-            queue: .main
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             self?.bringToFront()
         }
-
         applySettings()
     }
 
@@ -56,9 +62,6 @@ final class OverlayController {
     static func targetScreen() -> NSScreen? {
         NSScreen.screens.first ?? NSScreen.main
     }
-
-    var panelWindowNumber: Int { panel.windowNumber }
-    var activeCount: Int { stage.activeCount + stage.pendingCount }
 
     func show() {
         isVisible = true
@@ -68,11 +71,10 @@ final class OverlayController {
 
     func hide() {
         isVisible = false
-        stage.clear()
         panel.orderOut(nil)
     }
 
-    /// 暫時隱藏（例如螢幕鎖定），不清空、不改變 isVisible。
+    /// 暫時移開（螢幕鎖定），不改變 isVisible。
     func suspend() {
         panel.orderOut(nil)
     }
@@ -86,16 +88,12 @@ final class OverlayController {
         panel.orderFrontRegardless()
     }
 
-    func enqueue(_ text: String) {
-        stage.enqueue(text)
-    }
-
-    func clear() {
-        stage.clear()
-    }
-
+    /// 目前 QR Code 指向的網址；nil 代表沒有場次，QR Code 不顯示。
     func setURL(_ url: String?) {
+        self.url = url
         qrCard.setURL(url)
+        largeQR.setURL(url)
+        layoutQR()
     }
 
     func setLevel(_ newLevel: Int) {
@@ -110,34 +108,32 @@ final class OverlayController {
         if panel.frame != screen.frame {
             panel.setFrame(screen.frame, display: true)
         }
-        layoutQRCard()
-        applyStage()
+        applySettings()
     }
 
     private func applySettings() {
-        // objectWillChange 在值改變「之前」送出，延到下一輪再讀新值。
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.applyStage()
-            self.layoutQRCard()
-        }
-    }
-
-    private func applyStage() {
         stage.apply(.init(
-            fontSize: CGFloat(settings.fontSize),
+            style: settings.style,
+            referenceFontSize: settings.fontSize,
             crossingSeconds: settings.crossingSeconds,
             opacity: settings.opacity,
-            region: settings.region
+            area: settings.area,
+            maxConcurrent: settings.maxConcurrent
         ))
+        layoutQR()
     }
 
-    private func layoutQRCard() {
-        qrCard.isHidden = !settings.qrVisible
-        qrCard.qrSize = CGFloat(settings.qrSize)
-        let size = QRCardView.cardSize(qrSize: CGFloat(settings.qrSize))
+    private func layoutQR() {
+        let hasURL = url != nil
+        largeQR.isHidden = !(hasURL && largeQRVisible)
+        qrCard.isHidden = !(hasURL && settings.qrVisible) || largeQRVisible
+
         let bounds = rootView.bounds
-        let margin: CGFloat = 28
+        let scale = bounds.height / 1080
+        let qrSize = CGFloat(settings.qrSize) * max(scale, 0.5)
+        qrCard.qrSize = qrSize
+        let size = QRCardView.cardSize(qrSize: qrSize)
+        let margin = 28 * max(scale, 0.5)
         let topInset = (panel.screen ?? Self.targetScreen())?.safeAreaInsets.top ?? 0
         let x: CGFloat
         let y: CGFloat
@@ -157,5 +153,6 @@ final class OverlayController {
         }
         qrCard.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
         qrCard.needsDisplay = true
+        largeQR.needsDisplay = true
     }
 }

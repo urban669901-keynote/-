@@ -1,0 +1,11 @@
+{
+  "name": "urban-live-tests",
+  "private": true,
+  "type": "module",
+  "description": "URBAN LIVE 自動測試：協定測試、200 支手機壓力測試、手機端對端測試（需要先啟動 App）",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "playwright-core": "1.56.1",
+    "ws": "8.18.0"
+  }
+}
