@@ -112,7 +112,7 @@
 
 詳見 [docs/TESTING.md](docs/TESTING.md)（已驗證 / 尚未驗證分開列出）。
 
-- ✅ 自動化驗證（macOS 15 實機 CI）：單元測試、協定測試、QR Code 截圖解碼、彈幕覆蓋四種全螢幕方式、Chrome 手機端對端（按下發送到上螢幕 209 ms）、200 支手機壓力測試（全數連線、回條 p95 < 30 ms、App 記憶體 < 60 MB、CPU 平均 1.4%）。
+- ✅ 自動化驗證（macOS 15 實機 CI）：單元測試、協定測試、QR Code 截圖解碼、彈幕覆蓋四種全螢幕方式、Chrome 手機端對端（按下發送到上螢幕 196 ms）、200 支手機壓力測試（全數連線、回條 p95 < 40 ms、App 記憶體 < 60 MB、CPU 平均約 1%）。
 - ⚠️ 需要你實機確認：Keynote / PowerPoint 全螢幕播放、AirPlay → Apple TV → 投影機、投影上的 QR Code 掃描、真實 Wi-Fi 與手機、快捷鍵、長時間穩定性。
 
 ## 已知限制
