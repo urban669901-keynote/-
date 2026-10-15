@@ -14,6 +14,12 @@
 
 架構說明見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；Keynote 相容性與實機測試清單見 [docs/TESTING.md](docs/TESTING.md)。
 
+| Mac 畫面（彈幕 + QR Code） | 蓋在全螢幕視窗上（紅色為測試用全螢幕視窗） | 手機網頁 |
+| --- | --- | --- |
+| ![Mac 畫面](docs/images/desktop-with-qr.jpg) | ![全螢幕上的彈幕](docs/images/over-fullscreen.jpg) | <img src="docs/images/phone.jpg" width="220" alt="手機網頁"> |
+
+前兩張為 GitHub Actions macOS 機器上的實際截圖（1024×768）；手機網頁為 Chromium 模擬 iPhone，實機上 Emoji 為 Apple 樣式。
+
 ## 安裝
 
 ### 方式一：下載編譯好的 App

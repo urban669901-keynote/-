@@ -237,11 +237,22 @@ final class HostingWindow<Content: View> {
             window.title = title
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false
-            window.center()
             self.window = window
+        }
+        guard let window else { return }
+        if !window.isVisible {
+            // 先讓 SwiftUI 算出內容尺寸再置中，否則視窗會以 0 寬度置中後往右長、超出小螢幕
+            if let view = window.contentViewController?.view {
+                view.layoutSubtreeIfNeeded()
+                let size = view.fittingSize
+                if size.width > 0, size.height > 0 {
+                    window.setContentSize(size)
+                }
+            }
+            window.center()
         }
         // accessory App 需要主動啟用，視窗才會出現在最前面
         NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFront(nil)
     }
 }

@@ -122,7 +122,10 @@ extension WindowLevelMonitor.Snapshot {
         for window in windows.prefix(limit) {
             let coverage = Int((window.coverage(of: screen) * 100).rounded())
             let kind = window.ownerPID == ownPID ? "本彈幕" : (window.isRegularApp ? "App" : "系統")
-            lines.append("    layer \(window.layer)\t覆蓋 \(coverage)%\t\(kind)\t\(window.ownerName)")
+            let layer = String(window.layer)
+            let paddedLayer = String(repeating: " ", count: max(0, 10 - layer.count)) + layer
+            let paddedCoverage = String(repeating: " ", count: max(0, 3 - String(coverage).count)) + String(coverage)
+            lines.append("  layer \(paddedLayer)  覆蓋 \(paddedCoverage)%  \(window.ownerName)（\(kind)）")
         }
         return lines
     }
