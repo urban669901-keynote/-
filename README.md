@@ -1,117 +1,138 @@
-# URBAN 即時彈幕（macOS）
+# URBAN LIVE｜Mac 即時彈幕系統
 
-同仁用手機掃 QR Code 發送文字或 Emoji，彈幕即時飄過 Mac 畫面；Mac 以 **AirPlay 鏡像** 投到 Apple TV / 投影機，觀眾看到的就是疊了彈幕的簡報。
+早會時，同仁用手機掃 QR Code，輸入文字或 Emoji，訊息就以漂亮的動畫從右向左飄過投影畫面。
+**不改變原本的投影方式**：簡報照常在 Mac 播放，透過 AirPlay 鏡像到 Apple TV；彈幕是疊在畫面最上層的透明圖層，簡報不需要上傳到任何系統。
 
 ```
-同仁手機 ──同一個 Wi-Fi──▶ Mac（URBAN 即時彈幕）──AirPlay 鏡像──▶ Apple TV ──▶ 投影機
+同仁手機 ──同一個 Wi-Fi──▶ Mac（URBAN LIVE）──AirPlay 鏡像──▶ Apple TV ──▶ 投影機 / 電視
 ```
 
-- 原生 macOS 選單列 App：透明、置頂、**滑鼠穿透**的彈幕層，蓋在 Keynote、PowerPoint、PDF、YouTube、一般桌面上
-- URBAN Blue 風格：深藍半透明玻璃膠囊、白色粗體字，預設 48 px
-- 可調整字體大小、速度、不透明度、顯示區域；QR Code 可顯示 / 隱藏
-- 內建手機網頁伺服器，不需安裝任何其他軟體，不需要網際網路
-- 播放簡報時用全域快捷鍵暫停、清空、切換 QR Code
-
-架構說明見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；Keynote 相容性與實機測試清單見 [docs/TESTING.md](docs/TESTING.md)。
-
-| Mac 畫面（彈幕 + QR Code） | 蓋在全螢幕視窗上（紅色為測試用全螢幕視窗） | 手機網頁 |
+| 玻璃膠囊（預設） | 經典高對比 | URBAN LIVE 訊息卡 |
 | --- | --- | --- |
-| ![Mac 畫面](docs/images/desktop-with-qr.jpg) | ![全螢幕上的彈幕](docs/images/over-fullscreen.jpg) | <img src="docs/images/phone.jpg" width="220" alt="手機網頁"> |
+| ![A](docs/images/style-a-glass.jpg) | ![B](docs/images/style-b-classic.jpg) | ![C](docs/images/style-c-card.jpg) |
 
-前兩張為 GitHub Actions macOS 機器上的實際截圖（1024×768）；手機網頁為 Chromium 模擬 iPhone，實機上 Emoji 為 Apple 樣式。
+| 手機發送頁 | 控制面板 | 大型 QR Code（開場掃描用） |
+| --- | --- | --- |
+| <img src="docs/images/phone.jpg" width="230" alt="手機"> | ![控制面板](docs/images/control-panel.jpg) | ![大型 QR](docs/images/large-qr.jpg) |
+
+驗收畫面：手機送出的「URBAN 今天衝三件 🔥」出現在全螢幕視窗（紅色，模擬播放中的簡報）上方：
+
+![驗收](docs/images/acceptance-over-fullscreen.jpg)
+
+> 以上皆為 GitHub Actions macOS 機器上的實際截圖（1024×768 虛擬螢幕）。
+
+## 功能
+
+- **透明彈幕圖層**：無邊框、置頂、滑鼠穿透、不搶鍵盤焦點；支援多個桌面（Spaces）、全螢幕 App 與 AirPlay 鏡像。
+  自動偵測簡報播放視窗的層級並墊高（詳見 [架構說明](docs/ARCHITECTURE.md)）。
+- **三種樣式**：A 玻璃膠囊（預設）、B 經典高對比、C URBAN LIVE 訊息卡；URBAN 品牌色。
+- **暱稱與大頭貼**：觀眾可設定暱稱（最多 10 字）與大頭貼（12 種動物 Emoji 或上傳照片），顯示在彈幕前方。主持人可關閉暱稱、大頭貼或照片大頭貼。
+- **可讀性**：以 1920×1080 為基準，預設 48 px（可調 32～72），自動依螢幕解析度換算；蘋方 / SF 粗體、彩色 Emoji；控制面板有深色 / 白色 / 照片背景的即時預覽。
+- **動畫**：右進左出、約 10 秒（可調 6～16）、軌道分配不重疊不追撞、同時最多 5 則（可調），其餘排隊。
+- **顯示區域**：全螢幕 / 上方 30% / 下方 30%（預設下方），即時切換。
+- **QR Code**：開始場次自動產生；角落小 QR 或大型 QR；複製連結；重新產生場次連結（舊 QR 立即失效）。
+- **防洗版**：每人每 5 秒 1 則、25 字上限、敏感詞、重複訊息、佇列上限、封鎖特定觀眾、場次有效時間。
+- **即時回報**：手機會顯示「已送出 → 已上大螢幕 ✓」，未送達就顯示失敗，**不假裝成功**。
 
 ## 安裝
 
-### 方式一：下載編譯好的 App
-1. 到 GitHub 專案的 **Actions** →「macOS build & smoke test」→ 最新一次成功的執行 → 下載 Artifacts 中的 **URBANDanmaku-app**。
-2. 解壓縮兩次（Artifacts 外層一個 zip，裡面是 `URBANDanmaku.zip`），把 `URBANDanmaku.app` 拖到「應用程式」。
-3. 第一次打開：這個 App 沒有 Apple 開發者簽章，macOS 會擋下。請到 **系統設定 → 隱私權與安全性**，在下方按「強制打開」（macOS 14 以前可在 Finder 對 App 按右鍵 →「打開」）。
+### 下載
+1. 到 GitHub 專案的 **Actions** →「macOS build & tests」→ 最新一次成功（綠色勾勾）的執行 → 下方 Artifacts 下載 **URBAN-LIVE-macOS**。
+2. 解壓縮後打開 `URBAN-LIVE.dmg`，把 **URBAN LIVE** 拖到「應用程式」。
 
-### 方式二：自己編譯（需要 Xcode 或 Command Line Tools，macOS 12 以上）
-```bash
-./scripts/build-app.sh            # 產生 dist/URBANDanmaku.app
-open dist/URBANDanmaku.app
-```
+（也可以自己編譯：安裝 Xcode 或 Command Line Tools 後執行 `./scripts/build-app.sh`，產出在 `dist/`。）
 
-### 第一次啟動會看到的系統詢問
+### 第一次打開（測試版必讀）
+這是**測試版**：App 使用 ad-hoc 簽章，**沒有經過 Apple 公證**（公證需要 Apple Developer Program 付費帳號與 Developer ID 憑證，目前沒有），所以 macOS 會擋下第一次開啟：
+
+1. 在「應用程式」雙擊 URBAN LIVE → 出現「無法打開」→ 按「完成」。
+2. 打開 **系統設定 → 隱私權與安全性**，往下捲到「安全性」，按 **「強制打開」**（macOS 14 以前可在 Finder 對 App 按右鍵 →「打開」）。
+3. 之後就能正常開啟。
+
+會出現的系統詢問：
 - **「是否允許接受連入的網路連線？」** → 允許（手機要連進來）。
 - **「是否允許尋找區域網路上的裝置？」**（較新的 macOS）→ 允許。
 
-## 會議前準備（約 3 分鐘）
+不需要「輔助使用」或「螢幕錄製」權限。
 
-1. **Mac 與手機連同一個 Wi-Fi**（不要用訪客網路，見疑難排解）。
-2. **開啟 AirPlay 鏡像**：控制中心 →「螢幕鏡像」→ 選 Apple TV → 選 **鏡像** 內建顯示器（不要選「作為延伸顯示器」）。
-3. **打開 URBAN 即時彈幕**：選單列出現對話框圖示，畫面右下角出現 QR Code。
-4. 選單列 →「發送測試彈幕」，確認投影畫面看得到。
-5. 打開簡報開始播放。**第一次使用 Keynote 播放前，請先做一次「相容性測試」**（見下方）。
+## 每天早會的使用流程
 
-## 選單列與快捷鍵
+1. Mac 與同仁手機連**同一個 Wi-Fi**。
+2. 控制中心 →「螢幕鏡像」→ 選 Apple TV →「**鏡像**內建顯示器」（不要選延伸顯示器）。
+3. 打開 **URBAN LIVE**（選單列出現對話框圖示，並打開控制面板）。
+4. 按 **「開始彈幕」** → 投影右下角出現 QR Code。開場可按「切換大型 QR Code」讓大家掃。
+5. 同仁用手機相機掃 QR Code → 輸入訊息 → 發送。
+6. 照常播放簡報；彈幕在上方飄過，滑鼠與鍵盤照常操作簡報。
+7. 早會結束按 **「結束場次」**（手機會顯示「場次已結束」）。
 
-| 功能 | 選單列 | 全域快捷鍵（播放簡報時也能用） |
+**第一次在 Keynote 使用前，請先做一次「相容性測試」**（控制面板 → 快捷鍵與進階），步驟見 [docs/TESTING.md](docs/TESTING.md#4-實機驗收步驟約-10-分鐘會前做一次)。
+
+## 操作
+
+| 功能 | 控制面板 / 選單列 | 預設全域快捷鍵（簡報播放中也有效） |
 | --- | --- | --- |
-| 顯示 / 關閉彈幕 | 顯示彈幕 | ⌃⌥⌘D |
-| 暫停 / 繼續接收 | 暫停接收 | ⌃⌥⌘P |
-| 清空畫面上的彈幕 | 清空畫面 | ⌃⌥⌘C |
-| 顯示 / 隱藏 QR Code | 顯示 QR Code | ⌃⌥⌘R |
-| 發送測試彈幕 | 發送測試彈幕 | ⌃⌥⌘T |
-| 設定 | 設定… | |
-| 相容性測試 | 相容性測試（Keynote / PowerPoint）… | |
+| 顯示 / 隱藏彈幕 | ✅ | **⇧⌘B** |
+| 暫停 / 恢復 | ✅ | **⇧⌘P** |
+| 顯示 / 隱藏 QR Code | ✅ | **⇧⌘Q** |
+| 清空彈幕 | ✅ | ⌃⌥⌘C |
+| 開始彈幕、結束場次、大型 QR、複製連結、重新產生連結、測試彈幕 | ✅ | |
+| 清空等待佇列、封鎖觀眾、外觀與防洗版設定 | 控制面板 | |
 
-⌃ = Control、⌥ = Option、⌘ = Command。Keynote 播放時選單列不會出現，請用快捷鍵。
+- 快捷鍵可在「控制面板 → 快捷鍵與進階」重新錄製。註冊失敗（被其他 App 佔用）會顯示警告。
+- **⇧⌘Q 也是 macOS「登出」的快捷鍵**：URBAN LIVE 執行時通常會優先攔截；若你按下後出現登出對話框，請改成其他組合。
+- Keynote 全螢幕播放時選單列不會出現，請用快捷鍵。
+- 關閉控制面板後彈幕服務繼續在背景執行；從選單列圖示或再次打開 App 可回到控制面板。
+- **暫停**：畫面上的彈幕跑完，新訊息被擋下，手機顯示「主持人暫停了彈幕」。**隱藏**：整個彈幕圖層（含 QR Code）暫時隱藏。
 
-- **暫停接收**：畫面上的彈幕繼續跑完，新送出的會被擋下，手機顯示「主持人暫停了彈幕」。
-- **關閉彈幕**：整個彈幕層（含 QR Code）隱藏，手機顯示「彈幕目前沒有開啟」。
-- 選單第二行是手機網址，點一下可複製；Mac 有多個網路（例如 Wi-Fi + 有線）時可在「切換網路介面」選擇手機連得到的那個。
+## 網路
 
-## 設定
+預設使用**同一個 Wi-Fi**，不需要任何雲端服務或費用。訪客 Wi-Fi 隔離、手機用行動網路等情況的替代方案（iPhone 熱點、獨立路由器、Cloudflare Tunnel）見 [docs/NETWORK.md](docs/NETWORK.md)。
 
-| 項目 | 預設 | 範圍 |
-| --- | --- | --- |
-| 字體大小 | 48 px | 24–120 px |
-| 速度（通過整個畫面的時間） | 9 秒 | 4–20 秒 |
-| 不透明度 | 100% | 20–100% |
-| 顯示區域 | 上方 2/3 | 預設組合：上方 1/3、上半部、上方 2/3、全畫面、下半部，或自訂上下緣 |
-| QR Code | 顯示、右下、200 px | 四個角落、120–360 px |
-| 視窗層級 | 自動 | 自動 / 螢幕保護程式層級 / 最高層級 |
-
-手機端：每則最多 40 字（Emoji 算 1 字），同一支手機連續 3 則後每 2 秒 1 則。
-
-## 各種簡報軟體
-
-| 軟體 | 建議做法 | 狀態 |
-| --- | --- | --- |
-| 一般桌面、網頁 | 直接使用 | CI 已自動驗證 |
-| YouTube | 瀏覽器影片全螢幕 | 原生全螢幕 Space，CI 已自動驗證此類情境 |
-| PDF | 預覽程式全螢幕 / 幻燈片秀 | 原生全螢幕情境 CI 已驗證；請用相容性測試確認 |
-| PowerPoint | 投影片放映 | 請用相容性測試確認；保底：「觀眾自行瀏覽（視窗）」 |
-| **Keynote** | 播放 | **請務必先用相容性測試確認**；保底：「播放 > 在視窗中播放」 |
-
-Keynote 的完整方案（A 自動層級 → B 最高層級 → C Keynote 設定 → D 視窗模式）見 [docs/TESTING.md](docs/TESTING.md#3-keynote-可行方案依序嘗試)。
-
-## 疑難排解
+## 常見問題
 
 **手機打不開網頁 / 一直轉圈**
-- 確認手機與 Mac 在**同一個 Wi-Fi**。公司「訪客網路」通常開啟「用戶端隔離」，手機之間、手機與電腦之間互相連不到 → 改用內部 Wi-Fi，或用 Mac 的「網際網路共享」/ 手機熱點讓大家連同一個網路。
-- 關閉 Mac 的 VPN 再試。
-- 系統設定 → 網路 → 防火牆：確認「URBAN 即時彈幕」為「允許連入連線」。
-- QR Code 上的位址不是 Wi-Fi 的位址：選單列 →「切換網路介面」選 Wi-Fi（通常是 en0）。
+- 手機與 Mac 必須在同一個 Wi-Fi；手機用 4G/5G 連不到。
+- 公司「訪客 Wi-Fi」通常開啟用戶端隔離 → 改用內部 Wi-Fi（或見 [NETWORK.md](docs/NETWORK.md)）。
+- 系統設定 → 網路 → 防火牆：確認 URBAN LIVE 允許連入連線。
+- Mac 開著 VPN，或同時有 Wi-Fi 與有線網路 → 控制面板「網路介面」選 Wi-Fi（通常是 en0）。
 
-**Keynote 播放時看不到彈幕**
-依序試 [docs/TESTING.md](docs/TESTING.md#3-keynote-可行方案依序嘗試) 的方案 B → C → D。若都不行，請把 `~/Library/Logs/URBANDanmaku/` 裡的相容性測試紀錄傳給開發者。
+**手機顯示「這個連結已失效」**：主持人按了「重新產生場次連結」或場次已結束 → 重新掃描大螢幕上的 QR Code。
 
-**Apple TV 上看不到、Mac 上看得到**
-確認是「鏡像」而不是「延伸顯示器」：相容性測試視窗的顯示器資訊應為「啟用中 1 個」。
+**手機顯示「目前彈幕太多，請稍後再送」**：同時最多 5 則、排隊最多 12 則；人多時可在控制面板調高「同時最多顯示」或改用全螢幕區域。
 
-**埠號 8765 被佔用**
-App 會自動改用 8766、8767…，QR Code 會跟著更新。要固定其他埠號：`defaults write com.urban.danmaku port 9000` 後重新開啟 App。
+**Keynote 播放時看不到彈幕**：依序試 [Keynote 可行方案](docs/TESTING.md#5-keynote-可行方案依序嘗試) B → C → D，並把 `~/Library/Logs/URBANLive/` 的相容性測試紀錄傳給開發者。
+
+**Apple TV 上看不到、Mac 上看得到**：確認是「鏡像」而不是「延伸顯示器」（相容性測試視窗會顯示「啟用中 1 個」）。
+
+**App 意外關閉**：重新打開即可。進行中的場次會沿用同一個連結，手機會自動重新連線（不用重掃）。
+
+**埠號 8765 被佔用**：App 自動改用 8766、8767…，QR Code 會跟著更新。
+
+## 測試結果摘要
+
+詳見 [docs/TESTING.md](docs/TESTING.md)（已驗證 / 尚未驗證分開列出）。
+
+- ✅ 自動化驗證（macOS 15 實機 CI）：單元測試、協定測試、QR Code 截圖解碼、彈幕覆蓋四種全螢幕方式、Chrome 手機端對端（按下發送到上螢幕 209 ms）、200 支手機壓力測試（全數連線、回條 p95 < 30 ms、App 記憶體 < 60 MB、CPU 平均 1.4%）。
+- ⚠️ 需要你實機確認：Keynote / PowerPoint 全螢幕播放、AirPlay → Apple TV → 投影機、投影上的 QR Code 掃描、真實 Wi-Fi 與手機、快捷鍵、長時間穩定性。
+
+## 已知限制
+
+- 測試版：未經 Apple 公證，第一次開啟需手動允許；不是正式發行版本。
+- 手機必須連得到 Mac（預設同一個 Wi-Fi）。
+- 彈幕只顯示在主螢幕（鏡像模式下就是唯一的螢幕）。
+- 預設同時 5 則，螢幕每分鐘最多約 30 則；200 人同時狂送時多數人會收到「稍後再送」。
+- 沒有雲端、沒有歷史紀錄：訊息只在現場顯示，不會儲存。
 
 ## 開發
 
 ```bash
-swift test                     # 核心邏輯單元測試
-./scripts/build-app.sh         # 打包 App（UNIVERSAL=1 產生 Apple 晶片 + Intel 版本）
-./scripts/smoke-test.sh        # 啟動 App、測 API、截圖驗證全螢幕覆蓋
-open dist/URBANDanmaku.app --args --demo   # 展示模式：持續發送範例彈幕
+swift test                         # 核心邏輯單元測試
+./scripts/build-app.sh             # 打包 App、ZIP、DMG（UNIVERSAL=1 同時支援 Apple 晶片與 Intel）
+./scripts/smoke-test.sh            # 整合測試（需先 cd tests && npm ci）
+open "dist/URBAN LIVE.app" --args --start-session --demo   # 展示模式
 ```
 
-品牌色在 `Sources/URBANDanmaku/Theme.swift`。
+- 架構與技術選型（Swift/AppKit vs Tauri）：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- 網路方案：[docs/NETWORK.md](docs/NETWORK.md)
+- 測試與實機驗證：[docs/TESTING.md](docs/TESTING.md)
+- 品牌色：`Sources/URBANLive/Theme.swift`；三種樣式：`Sources/URBANLive/DanmakuRenderer.swift`
