@@ -613,7 +613,22 @@ enum AvatarFactory {
         }
     }
 
+    /// 相同 Emoji + 顏色、相同首字的大頭貼共用一張圖（200 人多半選同幾種動物）。
+    private static var sharedCache: [String: CGImage] = [:]
+
+    private static func cached(_ key: String, _ make: () -> CGImage?) -> CGImage? {
+        if let image = sharedCache[key] { return image }
+        guard let image = make() else { return nil }
+        if sharedCache.count > 300 { sharedCache.removeAll() }
+        sharedCache[key] = image
+        return image
+    }
+
     static func emojiAvatar(_ emoji: String, color: NSColor) -> CGImage? {
+        cached("e|\(emoji)|\(color.description)") { drawEmoji(emoji, color: color) }
+    }
+
+    private static func drawEmoji(_ emoji: String, color: NSColor) -> CGImage? {
         drawCircle(fill: color) { rect in
             let font = NSFont.systemFont(ofSize: rect.height * 0.58)
             let string = NSAttributedString(string: emoji, attributes: [.font: font])
@@ -625,7 +640,11 @@ enum AvatarFactory {
     /// 沒有選大頭貼但有暱稱：用暱稱第一個字。
     static func initialAvatar(_ nickname: String) -> CGImage? {
         guard let first = nickname.first else { return nil }
-        return drawCircle(fill: Brand.electricBlue) { rect in
+        return cached("i|\(first)") { drawInitial(first) }
+    }
+
+    private static func drawInitial(_ first: Character) -> CGImage? {
+        drawCircle(fill: Brand.electricBlue) { rect in
             let font = NSFont.systemFont(ofSize: rect.height * 0.5, weight: .bold)
             let string = NSAttributedString(string: String(first).uppercased(), attributes: [.font: font, .foregroundColor: NSColor.white])
             let size = string.size()
