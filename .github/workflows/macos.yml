@@ -26,6 +26,8 @@ jobs:
 
       - name: Smoke test (API + overlay over full-screen windows)
         run: ./scripts/smoke-test.sh
+        env:
+          PRINT_PREVIEWS: "1"
 
       - name: Upload app
         if: always()

@@ -104,6 +104,21 @@ fi
 stop_app
 defaults delete "${DOMAIN}" >/dev/null 2>&1 || true
 
+# CI 在無法下載 Artifacts 的環境中檢視截圖用：把縮小後的 JPEG 以 base64 印在 log 中
+if [[ "${PRINT_PREVIEWS:-0}" == "1" ]]; then
+  print_preview() { # 名稱 來源 sips 參數...
+    local name="$1" source="$2"
+    shift 2
+    [[ -f "${source}" ]] || return 0
+    sips -s format jpeg -s formatOptions 70 "$@" "${source}" --out "${OUT}/preview-${name}.jpg" >/dev/null 2>&1 || return 0
+    echo "=====BEGIN PREVIEW ${name}====="
+    base64 -i "${OUT}/preview-${name}.jpg" | fold -w 1000
+    echo "=====END PREVIEW ${name}====="
+  }
+  print_preview "desktop-with-qr" "${OUT}/06-desktop-with-qr.png" -Z 1100
+  print_preview "fullscreen-crop" "${OUT}/02-native-fullscreen.png" --cropToHeightWidth 520 1100
+fi
+
 echo
 echo "----- App 紀錄（層級變化）-----"
 grep -E "URBANDanmaku" "${OUT}/app.log" || true
