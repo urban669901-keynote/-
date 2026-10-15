@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_TW</string>
+	<key>CFBundleExecutable</key>
+	<string>URBANDanmaku</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.urban.danmaku</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>URBAN 即時彈幕</string>
+	<key>CFBundleDisplayName</key>
+	<string>URBAN 即時彈幕</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<!-- 選單列 App（accessory）：不出現在 Dock，且視窗可以進入其他 App 的全螢幕 Space -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>URBAN 即時彈幕需要接收同一個 Wi-Fi 網路內手機送出的彈幕。</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>URBAN</string>
+</dict>
+</plist>

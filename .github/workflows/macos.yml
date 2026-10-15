@@ -1,0 +1,44 @@
+name: macOS build & smoke test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Environment
+        run: |
+          sw_vers
+          swift --version
+          system_profiler SPDisplaysDataType | sed -n '1,40p' || true
+
+      - name: Unit tests (DanmakuCore)
+        run: swift test
+
+      - name: Build URBANDanmaku.app (Apple silicon + Intel)
+        run: UNIVERSAL=1 ./scripts/build-app.sh
+
+      - name: Smoke test (API + overlay over full-screen windows)
+        run: ./scripts/smoke-test.sh
+
+      - name: Upload app
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: URBANDanmaku-app
+          path: dist/URBANDanmaku.zip
+          if-no-files-found: ignore
+
+      - name: Upload smoke test screenshots & logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test
+          path: dist/smoke/
+          if-no-files-found: ignore
