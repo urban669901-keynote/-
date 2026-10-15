@@ -185,21 +185,29 @@ if ifconfig lo0 | grep -q "127.0.0.$((LOAD_CLIENTS + 1)) "; then
   launch_app load --start-session || exit 1
   URL="$(session_url)"
   sleep 3
-  BASELINE_KB="$(ps -o rss= -p "${APP_PID}" | tr -d ' ')"
+  rss_mb() { ps -o rss= -p "${APP_PID}" | awk '{ printf "%.1f", $1 / 1024 }'; }
+  # 活動監視器「記憶體」欄位顯示的是 footprint（不含已釋放、可回收的頁面）
+  footprint_of() { footprint "${APP_PID}" 2>/dev/null | grep -m1 -o 'Footprint: [0-9.]* [KMG]B' || echo "Footprint: 無法取得"; }
+  echo "記憶體（開始）：RSS $(rss_mb) MB；$(footprint_of)" | tee "${OUT}/memory.txt"
   ( while kill -0 "${APP_PID}" 2>/dev/null; do ps -o rss=,%cpu= -p "${APP_PID}" >>"${OUT}/resources.txt"; sleep 1; done ) &
   SAMPLER=$!
   node tests/loadtest.mjs --base "${BASE}" --token "${URL##*/}" --clients "${LOAD_CLIENTS}" --duration "${LOAD_SECONDS}" \
     --photos "${OUT}/photos" --out "${OUT}/loadtest.json" &
   LOAD_PID=$!
+  sleep 8
+  echo "記憶體（${LOAD_CLIENTS} 人帶照片連線後）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   # 一般互動階段中截圖：畫面上的彈幕各自帶著發送者自己的照片
-  sleep 25
+  sleep 17
   shot "22-photo-avatars"
+  echo "記憶體（一般互動中）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   wait "${LOAD_PID}" || fail "壓力測試"
+  echo "記憶體（壓力測試結束、手機離線後）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   kill "${SAMPLER}" 2>/dev/null
-  awk -v base="${BASELINE_KB}" -v clients="${LOAD_CLIENTS}" '{ if ($1 > max) max = $1; cpu += $2; if ($2 > peak) peak = $2; n++ } END {
-    printf "App 資源：記憶體開始 %.1f MB、最高 %.1f MB（增加 %.1f MB，平均每位觀眾 %.0f KB）；CPU 平均 %.1f%%、最高 %.1f%%（%d 次取樣）\n",
-      base / 1024, max / 1024, (max - base) / 1024, (max - base) / clients, cpu / n, peak, n }' \
+  wait "${SAMPLER}" 2>/dev/null
+  awk '{ if ($1 > max) max = $1; cpu += $2; if ($2 > peak) peak = $2; n++ } END {
+    printf "App 資源：記憶體（RSS）最高 %.1f MB；CPU 平均 %.1f%%、最高 %.1f%%（%d 次取樣）\n", max / 1024, cpu / n, peak, n }' \
     "${OUT}/resources.txt" | tee "${OUT}/resources-summary.txt"
+  echo "RSS 每秒（MB）：$(awk '{ printf "%.0f ", $1 / 1024 }' "${OUT}/resources.txt")"
   grep -h "照片大頭貼" "${LOG}" | sed 's/^.*URBAN LIVE: //' | sort -u -t' ' -k2,2n | tail -3 | tee "${OUT}/photo-usage.txt"
   if grep -q "照片大頭貼 ${LOAD_CLIENTS} 人" "${LOG}"; then
     pass "${LOAD_CLIENTS} 位觀眾的照片大頭貼全部被 App 接受"

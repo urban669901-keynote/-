@@ -160,6 +160,7 @@ public struct WebSocketReader {
     /// 回傳解析出的事件；`error` 不為 nil 時應關閉連線。
     public mutating func consume(_ data: Data) -> (events: [Event], error: String?) {
         buffer.append(data)
+        defer { compact() }
         var events: [Event] = []
         while true {
             switch WebSocket.parseFrame(buffer, maxPayload: maxMessageSize) {
@@ -201,6 +202,16 @@ public struct WebSocketReader {
                     }
                 }
             }
+        }
+    }
+
+    /// `removeFirst` 只縮小 Data 的範圍，底層記憶體不會釋放：不整理的話，每條連線會一直留著
+    /// 收過的最大訊息（例如約 70 KB 的照片大頭貼），200 人就是十幾 MB。
+    private mutating func compact() {
+        if buffer.isEmpty {
+            buffer = Data()
+        } else if buffer.startIndex != 0 {
+            buffer = buffer.withUnsafeBytes { Data($0) }
         }
     }
 
