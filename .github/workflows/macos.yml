@@ -27,7 +27,8 @@ jobs:
       - name: Smoke test (API + overlay over full-screen windows)
         run: ./scripts/smoke-test.sh
         env:
-          PRINT_PREVIEWS: "1"
+          # 設為 "1" 會把截圖縮圖以 base64 印在 log（無法下載 Artifacts 時用）
+          PRINT_PREVIEWS: "0"
 
       - name: Upload app
         if: always()
