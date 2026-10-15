@@ -48,7 +48,7 @@ header { text-align: center; margin-bottom: 18px; }
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
-.preview { height: 64px; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 12px; }
+.preview { height: 76px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
 .capsule {
   display: inline-block; max-width: 100%;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -89,7 +89,7 @@ button { font: inherit; touch-action: manipulation; cursor: pointer; }
   position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 24px);
   transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
   transition: opacity .2s, transform .2s;
-  max-width: 90vw; padding: 12px 20px; border-radius: 999px;
+  width: max-content; max-width: 88vw; padding: 12px 20px; border-radius: 999px;
   background: #fff; color: var(--blue); font-weight: 800; text-align: center;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .3);
 }
