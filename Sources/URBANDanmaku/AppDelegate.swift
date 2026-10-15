@@ -55,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if arguments.contains("--settings") {
             settingsWindow.show()
         }
+        if arguments.contains("--compatibility") {
+            compatibilityWindow.show()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

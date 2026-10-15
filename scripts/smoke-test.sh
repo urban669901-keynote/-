@@ -21,8 +21,8 @@ expect_code() { # 說明 預期代碼 實際代碼
 }
 
 APP_PID=""
-launch_app() {
-  "${APP_BIN}" --demo >>"${OUT}/app.log" 2>&1 &
+launch_app() { # 額外參數會傳給 App
+  "${APP_BIN}" --demo ${1+"$@"} >>"${OUT}/app.log" 2>&1 &
   APP_PID=$!
   for _ in $(seq 1 60); do
     curl -fsS "${BASE}/healthz" >/dev/null 2>&1 && return 0
@@ -92,16 +92,23 @@ run_probe "03-level-1000" "level:1000" required
 run_probe "04-level-shielding" "shielding" required
 run_probe "05-display-capture" "capture" optional
 
-# ---------- 3. 有 QR Code 的展示截圖 ----------
+# ---------- 3. 有 QR Code 的展示截圖、設定與相容性測試視窗 ----------
 stop_app
 defaults write "${DOMAIN}" qrVisible -bool true
-if launch_app; then
-  sleep 4
-  shot "06-desktop-with-qr"
-else
-  fail "第二次啟動失敗"
-fi
-stop_app
+screenshot_launch() { # 截圖名稱 App 參數...
+  local name="$1"
+  shift
+  if launch_app ${1+"$@"}; then
+    sleep 4
+    shot "${name}"
+  else
+    fail "啟動失敗（${name}）"
+  fi
+  stop_app
+}
+screenshot_launch "06-desktop-with-qr"
+screenshot_launch "07-settings-window" --settings
+screenshot_launch "08-compatibility-window" --compatibility
 defaults delete "${DOMAIN}" >/dev/null 2>&1 || true
 
 # CI 在無法下載 Artifacts 的環境中檢視截圖用：把縮小後的 JPEG 以 base64 印在 log 中
@@ -116,6 +123,8 @@ if [[ "${PRINT_PREVIEWS:-0}" == "1" ]]; then
     echo "=====END PREVIEW ${name}====="
   }
   print_preview "desktop-with-qr" "${OUT}/06-desktop-with-qr.png" -Z 1100
+  print_preview "settings" "${OUT}/07-settings-window.png" -Z 1100
+  print_preview "compatibility" "${OUT}/08-compatibility-window.png" -Z 1100
   print_preview "fullscreen-crop" "${OUT}/02-native-fullscreen.png" --cropToHeightWidth 520 1100
 fi
 
