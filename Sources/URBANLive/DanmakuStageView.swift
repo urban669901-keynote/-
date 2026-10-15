@@ -39,7 +39,7 @@ final class DanmakuStageView: NSView {
     var onDropped: ((DanmakuItem, String) -> Void)?
 
     private let container = CALayer()
-    private var scheduler = DanmakuScheduler<DanmakuItem>(limits: .init(maxConcurrent: 5, maxPending: 30, maxWait: 60))
+    private var scheduler = DanmakuScheduler<DanmakuItem>(limits: DanmakuStageView.limits(maxConcurrent: 5))
     private var pumpTimer: Timer?
     private(set) var configuration = Configuration(
         style: .glass, referenceFontSize: 48, crossingSeconds: 10, opacity: 1, area: .bottom, maxConcurrent: 5
@@ -80,9 +80,15 @@ final class DanmakuStageView: NSView {
     private var laneSpacing: CGFloat { round(effectiveFontSize * 0.22) }
     private var gap: CGFloat { round(effectiveFontSize * 1.1) }
 
+    /// 佇列上限依同時顯示數計算：預設 5 則同時顯示 → 最多排 12 則、最多等 30 秒。
+    /// 排太長的話，觀眾送出後要等很久才上螢幕；排不進去的會立刻收到「太多了，稍後再送」。
+    static func limits(maxConcurrent: Int) -> DanmakuScheduler<DanmakuItem>.Limits {
+        .init(maxConcurrent: maxConcurrent, maxPending: maxConcurrent * 2 + 2, maxWait: 30)
+    }
+
     func apply(_ newConfiguration: Configuration) {
         configuration = newConfiguration
-        scheduler.limits = .init(maxConcurrent: newConfiguration.maxConcurrent, maxPending: 30, maxWait: 60)
+        scheduler.limits = Self.limits(maxConcurrent: newConfiguration.maxConcurrent)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         container.opacity = Float(newConfiguration.opacity)

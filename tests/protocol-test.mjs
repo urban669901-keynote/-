@@ -13,14 +13,16 @@ const nextAddress = () => (args.aliases ? `127.0.0.${aliasIndex++}` : undefined)
 function request(method, path, body, localAddress) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, args.base);
-    const req = http.request({ method, hostname: url.hostname, port: url.port, path: url.pathname + url.search, localAddress,
-      headers: body ? { 'Content-Type': 'application/json' } : {} }, (res) => {
+    const payload = body ? JSON.stringify(body) : null;
+    // 與瀏覽器 fetch 相同：帶 Content-Length（不使用 chunked）
+    const headers = payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {};
+    const req = http.request({ method, hostname: url.hostname, port: url.port, path: url.pathname + url.search, localAddress, headers }, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, body: data }));
     });
     req.on('error', reject);
-    if (body) req.write(JSON.stringify(body));
+    if (payload) req.write(payload);
     req.end();
   });
 }

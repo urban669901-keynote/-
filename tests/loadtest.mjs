@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import { Phone, parseArgs, percentile, sleep } from './lib.mjs';
 
-const args = parseArgs({ base: 'http://127.0.0.1:8765', clients: '200', duration: '60', out: '' });
+const args = parseArgs({ base: 'http://127.0.0.1:8765', clients: '200', duration: '60', normal: '45', out: '' });
 if (!args.token) { console.error('需要 --token'); process.exit(2); }
 const clientCount = Number(args.clients);
 const duration = Number(args.duration) * 1000;
@@ -44,7 +44,35 @@ summary.connect = {
 console.log(`  成功 ${summary.connect.succeeded}、失敗 ${summary.connect.failed}，全部完成 ${summary.connect.allConnectedInMs} ms`);
 const live = phones.filter((_, i) => connectResults[i].status === 'fulfilled');
 
-// ---------- 2. 同一秒全部發送 ----------
+// ---------- 2. 一般互動：200 人在線，全場平均每 3 秒有人送一則 ----------
+const normalSeconds = Number(args.normal);
+console.log(`▶ 一般互動 ${normalSeconds} 秒：${live.length} 人在線，全場平均每 3 秒有人送一則…`);
+const normal = [];
+const normalPending = [];
+const normalDeadline = performance.now() + normalSeconds * 1000;
+for (let k = 0; performance.now() < normalDeadline; k += 1) {
+  const phone = live[(k * 37) % live.length];
+  normalPending.push(phone.send(texts[k % texts.length]).then((result) => { result.phone = phone; normal.push(result); }));
+  await sleep(2000 + Math.random() * 2000);
+}
+await Promise.all(normalPending);
+await sleep(15000); // 等最後幾則上螢幕
+const normalShown = normal
+  .filter((r) => r.ack && r.ack.ok)
+  .map((r) => { const at = r.phone.shownAt(r.id); return at ? at - r.sentAt : null; })
+  .filter((v) => v !== null);
+summary.normal = {
+  sent: normal.length,
+  outcomes: tally(normal),
+  ackLatencyMs: stats(normal.filter((r) => r.ack).map((r) => r.ack.latency)),
+  shown: normalShown.length,
+  sendToShownMs: stats(normalShown),
+};
+console.log(`  送出 ${summary.normal.sent} 則：${JSON.stringify(summary.normal.outcomes)}`);
+console.log(`  回條延遲 p50 ${summary.normal.ackLatencyMs.p50} ms、p95 ${summary.normal.ackLatencyMs.p95} ms、最大 ${summary.normal.ackLatencyMs.max} ms`);
+console.log(`  已顯示 ${summary.normal.shown} 則；送出到上螢幕 p50 ${summary.normal.sendToShownMs.p50} ms、p95 ${summary.normal.sendToShownMs.p95} ms、最大 ${summary.normal.sendToShownMs.max} ms`);
+
+// ---------- 3. 同一瞬間全部發送 ----------
 console.log(`▶ ${live.length} 支手機在同一瞬間發送…`);
 const burst = await Promise.all(live.map((phone, i) => phone.send(texts[i % texts.length])));
 summary.burst = {
@@ -53,7 +81,7 @@ summary.burst = {
 };
 console.log(`  結果：${JSON.stringify(summary.burst.outcomes)}；回條延遲 p50 ${summary.burst.ackLatencyMs.p50} ms、p95 ${summary.burst.ackLatencyMs.p95} ms、最大 ${summary.burst.ackLatencyMs.max} ms`);
 
-// ---------- 3. 持續發送 ----------
+// ---------- 4. 極端情況：每個人都持續發送 ----------
 console.log(`▶ 持續 ${duration / 1000} 秒：每支手機每 6～20 秒發送一則…`);
 await sleep(5500); // 讓同時發送的冷卻時間過去
 const sustained = [];
@@ -86,7 +114,7 @@ console.log(`  共送出 ${summary.sustained.sent} 則（約 ${summary.sustained
 console.log(`  回條延遲 p50 ${summary.sustained.ackLatencyMs.p50} ms、p95 ${summary.sustained.ackLatencyMs.p95} ms、最大 ${summary.sustained.ackLatencyMs.max} ms`);
 console.log(`  已顯示 ${summary.sustained.shown} 則；送出到上螢幕 p50 ${summary.sustained.sendToShownMs.p50} ms、p95 ${summary.sustained.sendToShownMs.p95} ms`);
 
-// ---------- 4. 連線穩定度 ----------
+// ---------- 5. 連線穩定度 ----------
 summary.stillConnected = live.filter((phone) => phone.closed === null).length;
 console.log(`▶ 測試結束時仍連線：${summary.stillConnected} / ${live.length}`);
 live.forEach((phone) => phone.close());
@@ -96,7 +124,9 @@ if (args.out) fs.writeFileSync(args.out, JSON.stringify(summary, null, 2));
 // ---------- 判定 ----------
 const problems = [];
 if (summary.connect.failed > 0) problems.push(`${summary.connect.failed} 支手機連線失敗`);
-const noAck = (summary.burst.outcomes.no_ack || 0) + (summary.sustained.outcomes.no_ack || 0);
+const noAck = (summary.normal.outcomes.no_ack || 0) + (summary.burst.outcomes.no_ack || 0) + (summary.sustained.outcomes.no_ack || 0);
+if ((summary.normal.ackLatencyMs.p95 ?? 0) > 1000) problems.push(`一般互動回條 p95 超過 1 秒`);
+if (summary.normal.shown < (summary.normal.outcomes.accepted || 0)) problems.push(`一般互動有 ${(summary.normal.outcomes.accepted || 0) - summary.normal.shown} 則被接受卻沒有顯示`);
 if (noAck > 0) problems.push(`${noAck} 則沒有收到回條`);
 if ((summary.burst.ackLatencyMs.p95 ?? 0) > 1000) problems.push(`同時發送回條 p95 超過 1 秒`);
 if ((summary.sustained.ackLatencyMs.p95 ?? 0) > 1000) problems.push(`持續發送回條 p95 超過 1 秒`);
