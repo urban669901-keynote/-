@@ -254,6 +254,14 @@ private struct AppearanceTab: View {
                         }
                         .pickerStyle(.segmented)
                         Stepper("同時最多顯示 \(settings.maxConcurrent) 則（其餘排隊）", value: $settings.maxConcurrent, in: 1...12)
+                        Picker("大頭貼與暱稱大小", selection: $settings.profileSize) {
+                            ForEach(ProfileSize.allCases, id: \.self) { size in
+                                Text(size.title).tag(size)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        Text("「大」「特大」會把暱稱放在訊息上方、大頭貼放大，照片人像在投影上看得清楚；每則彈幕變高，下方區域的軌道會從 3 條變 2 條。")
+                            .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                         Toggle("顯示暱稱", isOn: $settings.showNickname)
                         Toggle("顯示大頭貼", isOn: $settings.showAvatar)
                         Toggle("允許觀眾上傳照片當大頭貼（關閉時只能選 Emoji 大頭貼）", isOn: $settings.allowPhotoAvatar)
@@ -319,7 +327,7 @@ enum PreviewBackground: String, CaseIterable {
 /// 即時預覽：把三則範例彈幕畫在模擬的投影片背景上（1080p 的一半大小）。
 enum PreviewRenderer {
     static func image(settings: Settings, background: PreviewBackground) -> NSImage {
-        let size = NSSize(width: 960, height: 300)
+        let size = NSSize(width: 960, height: 340)
         let previewScale: CGFloat = 0.5
         let fontSize = CGFloat(settings.fontSize) * previewScale
         let samples = [Samples.messages[0], Samples.messages[2], Samples.messages[3]]
@@ -335,12 +343,14 @@ enum PreviewRenderer {
                 nickname: settings.showNickname ? sample.nickname : nil,
                 avatar: settings.showAvatar ? avatar : nil
             )
-            return DanmakuRenderer.render(content, style: settings.style, fontSize: fontSize, scale: 2, maxBodyWidth: size.width * 0.92)
+            return DanmakuRenderer.render(content, style: settings.style, fontSize: fontSize, profileSize: settings.profileSize,
+                                          scale: 2, maxBodyWidth: size.width * 0.92)
         }
 
         return NSImage(size: size, flipped: false) { rect in
             PreviewRenderer.drawBackground(background, in: rect)
-            let lane = DanmakuRenderer.laneHeight(style: settings.style, fontSize: fontSize) + fontSize * 0.25
+            let lane = DanmakuRenderer.laneHeight(style: settings.style, fontSize: fontSize, profileSize: settings.profileSize,
+                                                  profilesShown: settings.showNickname || settings.showAvatar) + fontSize * 0.25
             let xs: [CGFloat] = [40, 520, 160]
             for (index, item) in rendered.enumerated() {
                 let y = rect.height - 40 - lane * CGFloat(index + 1) + (lane - item.size.height) / 2

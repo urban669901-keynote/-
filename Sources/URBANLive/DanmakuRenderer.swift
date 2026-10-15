@@ -9,27 +9,43 @@ struct DanmakuContent {
     let avatar: CGImage?
 }
 
-/// 某個樣式、某個字體大小下的尺寸（全部由字體大小推算，同一樣式每條軌道等高）。
+/// 某個樣式、某個字體大小下的尺寸（全部由字體大小推算，同一設定下每條軌道等高）。
 struct DanmakuMetrics {
     let style: DanmakuStyle
+    let profileSize: ProfileSize
     let fontSize: CGFloat
     let font: NSFont
-    let nicknameFont: NSFont
     let lineHeight: CGFloat
-    let height: CGFloat
-    let horizontalPadding: CGFloat
     /// 圖片四周預留給陰影的空間
     let margin: CGFloat
-    let avatarDiameter: CGFloat
     let gap: CGFloat
 
-    init(style: DanmakuStyle, fontSize: CGFloat) {
+    // 單行（標準）
+    let nicknameFont: NSFont
+    let height: CGFloat
+    let horizontalPadding: CGFloat
+    let avatarDiameter: CGFloat
+
+    // 兩行（大 / 特大）：上行暱稱、下行訊息
+    let profileNicknameFont: NSFont
+    let profileNicknameLineHeight: CGFloat
+    let profileLineGap: CGFloat
+    /// 兩行膠囊的高度
+    let profileCapsuleHeight: CGFloat
+    let profileAvatarDiameter: CGFloat
+    /// 大頭貼是否超出膠囊上下緣（特大）
+    let profileAvatarProtrudes: Bool
+
+    init(style: DanmakuStyle, fontSize: CGFloat, profileSize: ProfileSize = .large) {
         self.style = style
+        self.profileSize = profileSize
         self.fontSize = fontSize
         font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
-        nicknameFont = NSFont.systemFont(ofSize: round(fontSize * 0.62), weight: .semibold)
         lineHeight = DanmakuRenderer.lineHeight(for: font)
         gap = round(fontSize * 0.28)
+        margin = max(6, round(fontSize * 0.26))
+
+        nicknameFont = NSFont.systemFont(ofSize: round(fontSize * 0.62), weight: .semibold)
         switch style {
         case .glass:
             height = lineHeight + round(fontSize * 0.24) * 2
@@ -44,7 +60,32 @@ struct DanmakuMetrics {
             horizontalPadding = round(fontSize * 0.56)
             avatarDiameter = round(height * 0.68)
         }
-        margin = max(6, round(fontSize * 0.26))
+
+        let nicknameScale: CGFloat = profileSize == .extraLarge ? 0.95 : 0.8
+        profileNicknameFont = NSFont.systemFont(ofSize: round(fontSize * nicknameScale), weight: .bold)
+        profileNicknameLineHeight = DanmakuRenderer.lineHeight(for: profileNicknameFont)
+        profileLineGap = round(fontSize * 0.02)
+        let verticalPadding: CGFloat
+        switch style {
+        case .glass: verticalPadding = round(fontSize * 0.16)
+        case .classic: verticalPadding = round(fontSize * 0.04)
+        case .card: verticalPadding = round(fontSize * 0.2)
+        }
+        profileCapsuleHeight = profileNicknameLineHeight + profileLineGap + lineHeight + verticalPadding * 2
+        profileAvatarProtrudes = profileSize == .extraLarge && style != .classic
+        if profileSize == .extraLarge {
+            profileAvatarDiameter = round(profileCapsuleHeight * (style == .classic ? 1.0 : 1.12))
+        } else {
+            profileAvatarDiameter = round(profileCapsuleHeight * (style == .classic ? 0.95 : 0.86))
+        }
+    }
+
+    /// 兩行版面的整體高度（特大時大頭貼比膠囊高）。
+    var profileBodyHeight: CGFloat { max(profileCapsuleHeight, profileAvatarDiameter) }
+
+    /// 軌道高度。`profilesShown`：是否會顯示暱稱或大頭貼。
+    func laneHeight(profilesShown: Bool) -> CGFloat {
+        profilesShown && profileSize != .standard ? profileBodyHeight : height
     }
 }
 
@@ -65,7 +106,7 @@ enum DanmakuRenderer {
     private static var lineHeightCache: [Int: CGFloat] = [:]
 
     static func lineHeight(for font: NSFont) -> CGFloat {
-        let key = Int(font.pointSize * 100)
+        let key = Int(font.pointSize * 100) * 10 + (font.fontDescriptor.symbolicTraits.contains(.bold) ? 1 : 0)
         if let cached = lineHeightCache[key] { return cached }
         // 用中文、英文、Emoji 混合字串量，涵蓋蘋方與 Apple Color Emoji 的備援字型
         let height = ceil(NSAttributedString(string: "國Ag😀", attributes: [.font: font]).size().height)
@@ -73,8 +114,8 @@ enum DanmakuRenderer {
         return height
     }
 
-    static func laneHeight(style: DanmakuStyle, fontSize: CGFloat) -> CGFloat {
-        DanmakuMetrics(style: style, fontSize: fontSize).height
+    static func laneHeight(style: DanmakuStyle, fontSize: CGFloat, profileSize: ProfileSize, profilesShown: Bool) -> CGFloat {
+        DanmakuMetrics(style: style, fontSize: fontSize, profileSize: profileSize).laneHeight(profilesShown: profilesShown)
     }
 
     /// 繪製一則彈幕。太長時先縮小字體（最小 60%），仍放不下才截斷並加上「…」，確保不超出畫面。
@@ -82,12 +123,22 @@ enum DanmakuRenderer {
         _ content: DanmakuContent,
         style: DanmakuStyle,
         fontSize: CGFloat,
+        profileSize: ProfileSize = .large,
         scale: CGFloat,
         maxBodyWidth: CGFloat = .greatestFiniteMagnitude
     ) -> RenderedDanmaku? {
+        let hasProfile = (content.nickname?.isEmpty == false) || content.avatar != nil
+        let twoLine = profileSize != .standard && hasProfile
+
+        func makeLayout(_ size: CGFloat, _ text: String) -> AnyLayout {
+            let metrics = DanmakuMetrics(style: style, fontSize: size, profileSize: profileSize)
+            return twoLine ? .profile(ProfileLayout(content: content, text: text, metrics: metrics))
+                : .compact(CompactLayout(content: content, text: text, metrics: metrics))
+        }
+
         var size = fontSize
         var text = content.text
-        var layout = Layout(content: content, text: text, metrics: DanmakuMetrics(style: style, fontSize: size))
+        var layout = makeLayout(size, text)
         var attempts = 0
         while layout.bodyWidth > maxBodyWidth && attempts < 40 {
             attempts += 1
@@ -98,14 +149,40 @@ enum DanmakuRenderer {
             } else {
                 break
             }
-            layout = Layout(content: content, text: text, metrics: DanmakuMetrics(style: style, fontSize: size))
+            layout = makeLayout(size, text)
         }
-        return draw(layout, scale: scale)
+        switch layout {
+        case let .compact(compact): return drawCompact(compact, scale: scale)
+        case let .profile(profile): return drawProfile(profile, scale: scale)
+        }
     }
 
     // MARK: - 版面
 
-    private struct Layout {
+    private enum AnyLayout {
+        case compact(CompactLayout)
+        case profile(ProfileLayout)
+
+        var bodyWidth: CGFloat {
+            switch self {
+            case let .compact(layout): return layout.bodyWidth
+            case let .profile(layout): return layout.bodyWidth
+            }
+        }
+    }
+
+    private static func tagString(_ m: DanmakuMetrics, scale: CGFloat = 1) -> (NSAttributedString, CGSize) {
+        let tag = NSAttributedString(string: "URBAN LIVE", attributes: [
+            .font: NSFont.systemFont(ofSize: max(9, round(m.fontSize * 0.27 * scale)), weight: .heavy),
+            .foregroundColor: NSColor.white,
+            .kern: m.fontSize * 0.02 * scale,
+        ])
+        let text = tag.size()
+        return (tag, CGSize(width: ceil(text.width + m.fontSize * 0.62 * scale), height: ceil(m.fontSize * 0.5 * scale)))
+    }
+
+    /// 單行：大頭貼 + 暱稱 + 訊息
+    private struct CompactLayout {
         let metrics: DanmakuMetrics
         let attributed: NSAttributedString
         let textSize: CGSize
@@ -120,21 +197,16 @@ enum DanmakuRenderer {
             avatar = content.avatar
             let attributed = NSMutableAttributedString()
             if let nickname = content.nickname, !nickname.isEmpty {
-                attributed.append(NSAttributedString(string: nickname + "\u{2002}", attributes: DanmakuRenderer.nicknameAttributes(m)))
+                attributed.append(NSAttributedString(string: nickname + "\u{2002}", attributes: DanmakuRenderer.nicknameAttributes(m, font: m.nicknameFont)))
             }
             attributed.append(NSAttributedString(string: text, attributes: DanmakuRenderer.messageAttributes(m)))
             self.attributed = attributed
             textSize = attributed.size()
 
             if m.style == .card {
-                let tag = NSAttributedString(string: "URBAN LIVE", attributes: [
-                    .font: NSFont.systemFont(ofSize: max(9, round(m.fontSize * 0.27)), weight: .heavy),
-                    .foregroundColor: NSColor.white,
-                    .kern: m.fontSize * 0.02,
-                ])
-                self.tag = tag
-                let tagText = tag.size()
-                tagSize = CGSize(width: ceil(tagText.width + m.fontSize * 0.62), height: ceil(m.fontSize * 0.5))
+                let made = DanmakuRenderer.tagString(m)
+                tag = made.0
+                tagSize = made.1
             } else {
                 tag = nil
                 tagSize = .zero
@@ -156,6 +228,74 @@ enum DanmakuRenderer {
         }
     }
 
+    /// 兩行：大大頭貼 + 上行暱稱（樣式 C 前面加 URBAN LIVE 標籤）+ 下行訊息
+    private struct ProfileLayout {
+        let metrics: DanmakuMetrics
+        let nickname: NSAttributedString?
+        let message: NSAttributedString
+        let nicknameSize: CGSize
+        let messageSize: CGSize
+        let avatar: CGImage?
+        let tag: NSAttributedString?
+        let tagSize: CGSize
+        /// 以下皆為相對本體左緣的 x
+        let avatarX: CGFloat
+        let capsuleX: CGFloat
+        let textX: CGFloat
+        let bodyWidth: CGFloat
+
+        init(content: DanmakuContent, text: String, metrics m: DanmakuMetrics) {
+            metrics = m
+            avatar = content.avatar
+            if let name = content.nickname, !name.isEmpty {
+                nickname = NSAttributedString(string: name, attributes: DanmakuRenderer.nicknameAttributes(m, font: m.profileNicknameFont))
+            } else {
+                nickname = nil
+            }
+            message = NSAttributedString(string: text, attributes: DanmakuRenderer.messageAttributes(m))
+            nicknameSize = nickname?.size() ?? .zero
+            messageSize = message.size()
+
+            if m.style == .card && nickname != nil {
+                let made = DanmakuRenderer.tagString(m, scale: 1.1)
+                tag = made.0
+                tagSize = made.1
+            } else {
+                tag = nil
+                tagSize = .zero
+            }
+
+            let capsule = m.profileCapsuleHeight
+            let diameter = m.profileAvatarDiameter
+            let edge: CGFloat
+            switch m.style {
+            case .glass: edge = round(m.fontSize * 0.6)
+            case .classic: edge = round(m.fontSize * 0.14)
+            case .card: edge = round(m.fontSize * 0.5)
+            }
+            if avatar != nil {
+                if m.profileAvatarProtrudes {
+                    // 特大：大頭貼坐在膠囊左端、上下超出
+                    avatarX = 0
+                    capsuleX = round(diameter * 0.5)
+                } else if m.style == .classic {
+                    avatarX = edge
+                    capsuleX = 0
+                } else {
+                    avatarX = (capsule - diameter) / 2 + (m.style == .card ? round(m.fontSize * 0.1) : 0)
+                    capsuleX = 0
+                }
+                textX = avatarX + diameter + round(m.gap * 1.1)
+            } else {
+                avatarX = 0
+                capsuleX = 0
+                textX = m.style == .card ? round(m.fontSize * 0.42) : edge
+            }
+            let firstLine = (tag != nil ? tagSize.width + round(m.gap * 0.6) : 0) + ceil(nicknameSize.width)
+            bodyWidth = ceil(textX + max(firstLine, ceil(messageSize.width)) + edge)
+        }
+    }
+
     static func messageAttributes(_ m: DanmakuMetrics) -> [NSAttributedString.Key: Any] {
         switch m.style {
         case .glass:
@@ -171,20 +311,24 @@ enum DanmakuRenderer {
         }
     }
 
-    static func nicknameAttributes(_ m: DanmakuMetrics) -> [NSAttributedString.Key: Any] {
+    static func nicknameAttributes(_ m: DanmakuMetrics, font: NSFont) -> [NSAttributedString.Key: Any] {
         switch m.style {
-        case .glass, .classic:
-            return [.font: m.nicknameFont, .foregroundColor: Brand.warmGold]
+        case .glass:
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor(white: 0, alpha: 0.35)
+            shadow.shadowOffset = NSSize(width: 0, height: -1)
+            shadow.shadowBlurRadius = max(1, m.fontSize / 16)
+            return [.font: font, .foregroundColor: Brand.warmGold, .shadow: shadow]
+        case .classic:
+            return [.font: font, .foregroundColor: Brand.warmGold]
         case .card:
-            return [.font: m.nicknameFont, .foregroundColor: Brand.electricBlue]
+            return [.font: font, .foregroundColor: Brand.electricBlue]
         }
     }
 
     // MARK: - 繪製
 
-    private static func draw(_ layout: Layout, scale: CGFloat) -> RenderedDanmaku? {
-        let m = layout.metrics
-        let size = CGSize(width: layout.bodyWidth + m.margin * 2, height: m.height + m.margin * 2)
+    private static func makeContext(size: CGSize, scale: CGFloat) -> (CGContext, CGColorSpace)? {
         let pixelWidth = Int(ceil(size.width * scale))
         let pixelHeight = Int(ceil(size.height * scale))
         guard pixelWidth > 0, pixelHeight > 0, pixelWidth < 16_384,
@@ -195,44 +339,109 @@ enum DanmakuRenderer {
               )
         else { return nil }
         context.scaleBy(x: scale, y: scale)
+        return (context, colorSpace)
+    }
+
+    private static func avatarRing(_ m: DanmakuMetrics, large: Bool) -> NSColor {
+        switch m.style {
+        case .glass: return NSColor(white: 1, alpha: large ? 0.9 : 0.65)
+        case .classic: return NSColor.white
+        case .card: return large ? Brand.royalBlue.withAlphaComponent(0.55) : Brand.electricBlue.withAlphaComponent(0.35)
+        }
+    }
+
+    private static func drawCompact(_ layout: CompactLayout, scale: CGFloat) -> RenderedDanmaku? {
+        let m = layout.metrics
+        let size = CGSize(width: layout.bodyWidth + m.margin * 2, height: m.height + m.margin * 2)
+        guard let made = makeContext(size: size, scale: scale) else { return nil }
+        let (context, colorSpace) = made
 
         let body = CGRect(x: m.margin, y: m.margin, width: layout.bodyWidth, height: m.height)
         switch m.style {
         case .glass: drawGlassBackground(body, m, context, colorSpace)
         case .classic: break
-        case .card: drawCardBackground(body, m, context)
+        case .card: drawCardBackground(body, radius: body.height * 0.3, m, context)
         }
 
         var x = body.minX + layout.leftInset
         if let avatar = layout.avatar {
             let rect = CGRect(x: x, y: body.midY - m.avatarDiameter / 2, width: m.avatarDiameter, height: m.avatarDiameter)
-            let ring: NSColor
-            switch m.style {
-            case .glass: ring = NSColor(white: 1, alpha: 0.65)
-            case .classic: ring = NSColor.white
-            case .card: ring = Brand.electricBlue.withAlphaComponent(0.35)
-            }
-            drawAvatar(avatar, in: rect, ring: ring, ringWidth: max(1.5, m.avatarDiameter * 0.05), context: context, outline: m.style == .classic)
+            drawAvatar(avatar, in: rect, ring: avatarRing(m, large: false), ringWidth: max(1.5, m.avatarDiameter * 0.05),
+                       context: context, outline: m.style == .classic, shadow: false)
             x = rect.maxX + m.gap
         }
         if let tag = layout.tag {
             let rect = CGRect(x: x, y: body.midY - layout.tagSize.height / 2, width: layout.tagSize.width, height: layout.tagSize.height)
-            drawTag(tag, in: rect, m, context)
+            drawTag(tag, in: rect, context)
             x = rect.maxX + m.gap * 0.8
         }
 
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        let origin = CGPoint(x: x, y: body.minY + (m.height - layout.textSize.height) / 2)
-        if m.style == .classic {
-            drawOutlinedText(layout.attributed, at: origin, m)
-        } else {
-            layout.attributed.draw(at: origin)
-        }
+        drawText(layout.attributed, at: CGPoint(x: x, y: body.minY + (m.height - layout.textSize.height) / 2), m)
         NSGraphicsContext.restoreGraphicsState()
 
         guard let image = context.makeImage() else { return nil }
         return RenderedDanmaku(image: image, size: size, bodyWidth: layout.bodyWidth, margin: m.margin)
+    }
+
+    private static func drawProfile(_ layout: ProfileLayout, scale: CGFloat) -> RenderedDanmaku? {
+        let m = layout.metrics
+        let bodyHeight = m.profileBodyHeight
+        let size = CGSize(width: layout.bodyWidth + m.margin * 2, height: bodyHeight + m.margin * 2)
+        guard let made = makeContext(size: size, scale: scale) else { return nil }
+        let (context, colorSpace) = made
+
+        let body = CGRect(x: m.margin, y: m.margin, width: layout.bodyWidth, height: bodyHeight)
+        let capsule = CGRect(
+            x: body.minX + layout.capsuleX,
+            y: body.midY - m.profileCapsuleHeight / 2,
+            width: layout.bodyWidth - layout.capsuleX,
+            height: m.profileCapsuleHeight
+        )
+        switch m.style {
+        case .glass: drawGlassBackground(capsule, m, context, colorSpace)
+        case .classic: break
+        case .card: drawCardBackground(capsule, radius: capsule.height * 0.24, m, context)
+        }
+
+        if let avatar = layout.avatar {
+            let d = m.profileAvatarDiameter
+            let rect = CGRect(x: body.minX + layout.avatarX, y: body.midY - d / 2, width: d, height: d)
+            drawAvatar(avatar, in: rect, ring: avatarRing(m, large: true), ringWidth: max(2, d * 0.045),
+                       context: context, outline: m.style == .classic, shadow: m.style != .classic)
+        }
+
+        // 文字區塊在膠囊內垂直置中：上行暱稱、下行訊息
+        let blockHeight = (layout.nickname != nil ? layout.nicknameSize.height + m.profileLineGap : 0) + layout.messageSize.height
+        let messageY = body.midY - blockHeight / 2
+        var x = body.minX + layout.textX
+        let nicknameY = messageY + layout.messageSize.height + m.profileLineGap
+        if let tag = layout.tag {
+            let rect = CGRect(x: x, y: nicknameY + (layout.nicknameSize.height - layout.tagSize.height) / 2,
+                              width: layout.tagSize.width, height: layout.tagSize.height)
+            drawTag(tag, in: rect, context)
+            x = rect.maxX + round(m.gap * 0.6)
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        if let nickname = layout.nickname {
+            drawText(nickname, at: CGPoint(x: x, y: nicknameY), m)
+        }
+        drawText(layout.message, at: CGPoint(x: body.minX + layout.textX, y: messageY), m)
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let image = context.makeImage() else { return nil }
+        return RenderedDanmaku(image: image, size: size, bodyWidth: layout.bodyWidth, margin: m.margin)
+    }
+
+    private static func drawText(_ text: NSAttributedString, at origin: CGPoint, _ m: DanmakuMetrics) {
+        if m.style == .classic {
+            drawOutlinedText(text, at: origin, m)
+        } else {
+            text.draw(at: origin)
+        }
     }
 
     /// 樣式 A：深藍半透明玻璃膠囊。
@@ -269,7 +478,7 @@ enum DanmakuRenderer {
         }
         context.restoreGState()
 
-        // 細緻邊框：上緣帶一點電光藍
+        // 細緻邊框
         let lineWidth = max(1, m.fontSize * 0.032)
         let inset = body.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
         let insetRadius = inset.height / 2
@@ -282,8 +491,7 @@ enum DanmakuRenderer {
     }
 
     /// 樣式 C：白色圓角訊息卡 + 左側暖金細條。
-    private static func drawCardBackground(_ body: CGRect, _ m: DanmakuMetrics, _ context: CGContext) {
-        let radius = body.height * 0.3
+    private static func drawCardBackground(_ body: CGRect, radius: CGFloat, _ m: DanmakuMetrics, _ context: CGContext) {
         let path = CGPath(roundedRect: body, cornerWidth: radius, cornerHeight: radius, transform: nil)
 
         context.saveGState()
@@ -311,7 +519,7 @@ enum DanmakuRenderer {
     }
 
     /// 樣式 C 的「URBAN LIVE」小標籤。
-    private static func drawTag(_ tag: NSAttributedString, in rect: CGRect, _ m: DanmakuMetrics, _ context: CGContext) {
+    private static func drawTag(_ tag: NSAttributedString, in rect: CGRect, _ context: CGContext) {
         context.saveGState()
         let radius = rect.height / 2
         context.addPath(CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil))
@@ -345,7 +553,20 @@ enum DanmakuRenderer {
         text.draw(at: origin)
     }
 
-    private static func drawAvatar(_ image: CGImage, in rect: CGRect, ring: NSColor, ringWidth: CGFloat, context: CGContext, outline: Bool) {
+    private static func drawAvatar(
+        _ image: CGImage, in rect: CGRect, ring: NSColor, ringWidth: CGFloat,
+        context: CGContext, outline: Bool, shadow: Bool
+    ) {
+        if shadow {
+            // 大頭貼底下的柔和陰影，讓人像從膠囊上「浮」出來
+            context.saveGState()
+            context.setShadow(offset: CGSize(width: 0, height: -rect.height * 0.03), blur: rect.height * 0.12,
+                              color: NSColor(white: 0, alpha: 0.45).cgColor)
+            context.setFillColor(ring.cgColor)
+            context.fillEllipse(in: rect)
+            context.restoreGState()
+        }
+
         context.saveGState()
         context.addEllipse(in: rect)
         context.clip()
@@ -378,7 +599,8 @@ enum DanmakuRenderer {
 
 /// 把手機送來的大頭貼設定轉成圖片（每位觀眾只轉一次並快取）。
 enum AvatarFactory {
-    static let pixelSize = 160
+    /// 大頭貼放大後在 Retina 螢幕上約 300 px，所以以 320 px 繪製 / 縮圖，避免模糊。
+    static let pixelSize = 320
 
     static func image(for avatar: ValidatedAvatar, nickname: String?) -> CGImage? {
         switch avatar {
@@ -412,6 +634,7 @@ enum AvatarFactory {
     }
 
     /// 照片：用 ImageIO 直接產生縮圖（不會把大圖完整解碼到記憶體），再裁成正方形。
+    /// 直式照片往上裁（人像的臉通常在上半部），避免切到頭。
     static func photoAvatar(_ data: Data) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let type = CGImageSourceGetType(source).map({ $0 as String }),
@@ -425,8 +648,9 @@ enum AvatarFactory {
         guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         let side = min(thumbnail.width, thumbnail.height)
         guard side > 8 else { return nil }
-        let crop = CGRect(x: (thumbnail.width - side) / 2, y: (thumbnail.height - side) / 2, width: side, height: side)
-        return thumbnail.cropping(to: crop)
+        let x = (thumbnail.width - side) / 2
+        let y = (thumbnail.height - side) / 4 // CGImage 座標原點在左上角：往上偏
+        return thumbnail.cropping(to: CGRect(x: x, y: y, width: side, height: side))
     }
 
     private static func drawCircle(fill: NSColor, content: (CGRect) -> Void) -> CGImage? {

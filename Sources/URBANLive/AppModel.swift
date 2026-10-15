@@ -485,7 +485,8 @@ final class AppModel: ObservableObject {
             maxLength: settings.maxLength,
             cooldown: settings.cooldown,
             allowPhoto: settings.allowPhotoAvatar,
-            nickname: viewer.nickname
+            nickname: viewer.nickname,
+            profileSize: settings.profileSize.rawValue
         ).json(), to: viewer.id)
     }
 

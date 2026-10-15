@@ -60,6 +60,16 @@ h1 { margin: 0 0 4px; font-size: 26px; font-weight: 900; color: var(--deep); let
 .capsule .nick { color: var(--gold); font-size: 13px; font-weight: 700; }
 .capsule .msg { overflow: hidden; text-overflow: ellipsis; }
 .capsule.placeholder .msg { opacity: .6; }
+/* 大頭貼與暱稱放大（兩行）：與大螢幕上的樣式一致 */
+.capsule.profile { gap: 12px; padding: 6px 22px 6px 6px; border-radius: 40px; align-items: center; }
+.capsule.profile .avatar { width: 60px; height: 60px; font-size: 32px; border: 2.5px solid rgba(255,255,255,.9); box-shadow: 0 3px 10px rgba(0,0,0,.35); }
+.capsule.profile.xl .avatar { width: 74px; height: 74px; font-size: 40px; margin: -10px 0; }
+.capsule.profile .lines { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.capsule.profile .nick { font-size: 15px; font-weight: 800; }
+.capsule.profile.xl .nick { font-size: 17px; }
+.capsule.profile .msg { font-size: 18px; }
+.sheet-avatar { display: flex; justify-content: center; margin: 4px 0 6px; }
+.sheet-avatar .avatar { width: 112px; height: 112px; font-size: 60px; box-shadow: 0 6px 18px rgba(16,42,91,.25); border: 4px solid #fff; }
 
 .composer { display: flex; gap: 10px; }
 .composer input { flex: 1; min-width: 0; font-size: 17px; padding: 14px 16px; border-radius: 14px; border: 1.5px solid var(--line); outline: none; background: #fff; color: var(--text); }
@@ -161,6 +171,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
 <div class="sheet-backdrop" id="sheet">
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
     <h3 id="sheetTitle">我的暱稱與大頭貼</h3>
+    <div class="sheet-avatar" id="sheetAvatar"></div>
     <label for="nickname">暱稱（最多 10 個字，可留空）</label>
     <input id="nickname" type="text" maxlength="30" placeholder="例如：Kevin、小美">
     <label>大頭貼</label>
@@ -170,7 +181,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
       <button class="btn ghost" id="noAvatar" type="button">不使用大頭貼</button>
     </div>
     <input id="file" type="file" accept="image/*" style="display:none">
-    <p class="small" id="photoNote">照片只會縮小成小圓形大頭貼，傳送到現場的 Mac 顯示，不會上傳到其他地方。</p>
+    <p class="small" id="photoNote">照片會裁成圓形大頭貼，只傳送到現場的 Mac 顯示，不會上傳到其他地方。建議使用臉部清楚的照片。</p>
     <div class="row">
       <button class="btn ghost" id="cancelProfile" type="button">取消</button>
       <button class="btn" id="saveProfile" type="button">儲存</button>
@@ -208,7 +219,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
   var profile = load('profile', { nickname: '', avatar: { kind: 'none' } });
 
   var state = { ws: null, connected: false, attempts: 0, fallback: false, stopped: false, live: false,
-                maxLength: 25, cooldown: 5, cooldownUntil: 0, allowPhoto: true, pending: {}, counter: 0 };
+                maxLength: 25, cooldown: 5, cooldownUntil: 0, allowPhoto: true, profileSize: 'large', pending: {}, counter: 0 };
   var input = $('text'), sendButton = $('send');
 
   // ---------- 畫面 ----------
@@ -251,10 +262,15 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     var text = graphemes(clean(input.value)).slice(0, state.maxLength).join('');
     preview.innerHTML = '';
     var hasAvatar = profile.avatar && profile.avatar.kind !== 'none' || profile.nickname;
-    preview.className = 'capsule' + (text ? '' : ' placeholder') + (hasAvatar ? '' : ' noavatar');
+    // 主持人設定「大」「特大」時：大頭貼放大、暱稱在訊息上方（與大螢幕一致）
+    var big = hasAvatar && state.profileSize !== 'standard';
+    preview.className = 'capsule' + (text ? '' : ' placeholder') + (hasAvatar ? '' : ' noavatar') +
+      (big ? ' profile' : '') + (big && state.profileSize === 'extraLarge' ? ' xl' : '');
     if (hasAvatar) { preview.appendChild(avatarHTML(profile.avatar, profile.nickname)); }
-    if (profile.nickname) { var nick = document.createElement('span'); nick.className = 'nick'; nick.textContent = profile.nickname; preview.appendChild(nick); }
-    var msg = document.createElement('span'); msg.className = 'msg'; msg.textContent = text || '你的彈幕會長這樣'; preview.appendChild(msg);
+    var holder = preview;
+    if (big) { holder = document.createElement('div'); holder.className = 'lines'; preview.appendChild(holder); }
+    if (profile.nickname) { var nick = document.createElement('span'); nick.className = 'nick'; nick.textContent = profile.nickname; holder.appendChild(nick); }
+    var msg = document.createElement('span'); msg.className = 'msg'; msg.textContent = text || '你的彈幕會長這樣'; holder.appendChild(msg);
   }
   function updateCounter() {
     var count = graphemes(clean(input.value)).length;
@@ -365,6 +381,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
         state.maxLength = data.maxLength || 25;
         state.cooldown = data.cooldown || 5;
         state.allowPhoto = data.allowPhoto !== false;
+        state.profileSize = data.profileSize || 'large';
         hideNotice();
         applyState(data.state, data.message);
         updateCounter();
@@ -466,6 +483,8 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
   // ---------- 暱稱與大頭貼 ----------
   var draft = null;
   function renderChoices() {
+    var big = $('sheetAvatar'); big.innerHTML = '';
+    big.appendChild(avatarHTML(draft.avatar, graphemes(clean($('nickname').value)).join('')));
     var box = $('choices'); box.innerHTML = '';
     ANIMALS.forEach(function (emoji, index) {
       var button = document.createElement('button');
@@ -476,7 +495,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     });
     $('uploadBtn').style.display = state.allowPhoto ? 'block' : 'none';
     $('uploadBtn').textContent = draft.avatar.kind === 'photo' ? '✅ 已選照片（重選）' : '📷 上傳照片';
-    $('photoNote').textContent = state.allowPhoto ? '照片只會縮小成小圓形大頭貼，傳送到現場的 Mac 顯示，不會上傳到其他地方。' : '主持人目前只開放 Emoji 大頭貼。';
+    $('photoNote').textContent = state.allowPhoto ? '照片會裁成圓形大頭貼，只傳送到現場的 Mac 顯示，不會上傳到其他地方。建議使用臉部清楚的照片。' : '主持人目前只開放 Emoji 大頭貼。';
   }
   $('openProfile').addEventListener('click', function () {
     draft = JSON.parse(JSON.stringify(profile));
@@ -484,6 +503,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     renderChoices();
     $('sheet').className = 'sheet-backdrop open';
   });
+  $('nickname').addEventListener('input', function () { if (draft) { renderChoices(); } });
   $('cancelProfile').addEventListener('click', function () { $('sheet').className = 'sheet-backdrop'; });
   $('noAvatar').addEventListener('click', function () { draft.avatar = { kind: 'none' }; renderChoices(); });
   $('uploadBtn').addEventListener('click', function () { $('file').click(); });
@@ -494,11 +514,19 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     reader.onload = function () {
       var img = new Image();
       img.onload = function () {
+        // 裁成正方形、320×320（大螢幕放大後依然清楚）。直式照片往上裁，人像的臉通常在上半部。
         var side = Math.min(img.width, img.height), canvas = document.createElement('canvas');
-        canvas.width = 160; canvas.height = 160;
-        canvas.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 160, 160);
-        var data = canvas.toDataURL('image/jpeg', 0.82);
-        if (data.length > 120000) { toast('照片太大，請換一張', true); return; }
+        var sx = (img.width - side) / 2, sy = img.height > img.width ? (img.height - side) / 4 : (img.height - side) / 2;
+        canvas.width = 320; canvas.height = 320;
+        var ctx = canvas.getContext('2d');
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, 320, 320);
+        var data = null, qualities = [0.86, 0.76, 0.66, 0.56];
+        for (var q = 0; q < qualities.length; q++) {
+          data = canvas.toDataURL('image/jpeg', qualities[q]);
+          if (data.length <= 125000) { break; }
+        }
+        if (data.length > 125000) { toast('照片太大，請換一張', true); return; }
         draft.avatar = { kind: 'photo', data: data };
         renderChoices();
       };

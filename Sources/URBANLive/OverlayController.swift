@@ -118,7 +118,9 @@ final class OverlayController {
             crossingSeconds: settings.crossingSeconds,
             opacity: settings.opacity,
             area: settings.area,
-            maxConcurrent: settings.maxConcurrent
+            maxConcurrent: settings.maxConcurrent,
+            profileSize: settings.profileSize,
+            profilesShown: settings.showNickname || settings.showAvatar
         ))
         layoutQR()
     }

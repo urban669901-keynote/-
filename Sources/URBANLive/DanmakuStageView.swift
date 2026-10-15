@@ -31,6 +31,10 @@ final class DanmakuStageView: NSView {
         var opacity: Double
         var area: DisplayArea
         var maxConcurrent: Int
+        /// 大頭貼與暱稱大小
+        var profileSize: ProfileSize
+        /// 是否顯示暱稱或大頭貼（決定軌道高度）
+        var profilesShown: Bool
     }
 
     /// 上場時呼叫（已排隊秒數）。
@@ -42,7 +46,8 @@ final class DanmakuStageView: NSView {
     private var scheduler = DanmakuScheduler<DanmakuItem>(limits: DanmakuStageView.limits(maxConcurrent: 5))
     private var pumpTimer: Timer?
     private(set) var configuration = Configuration(
-        style: .glass, referenceFontSize: 48, crossingSeconds: 10, opacity: 1, area: .bottom, maxConcurrent: 5
+        style: .glass, referenceFontSize: 48, crossingSeconds: 10, opacity: 1, area: .bottom, maxConcurrent: 5,
+        profileSize: .large, profilesShown: true
     )
 
     override init(frame frameRect: NSRect) {
@@ -76,7 +81,9 @@ final class DanmakuStageView: NSView {
         CGFloat(ReferenceScale.points(forReferencePixels: configuration.referenceFontSize, screenHeightPoints: Double(max(bounds.height, 300))))
     }
 
-    private var metrics: DanmakuMetrics { DanmakuMetrics(style: configuration.style, fontSize: effectiveFontSize) }
+    private var metrics: DanmakuMetrics {
+        DanmakuMetrics(style: configuration.style, fontSize: effectiveFontSize, profileSize: configuration.profileSize)
+    }
     private var laneSpacing: CGFloat { round(effectiveFontSize * 0.22) }
     private var gap: CGFloat { round(effectiveFontSize * 1.1) }
 
@@ -112,7 +119,7 @@ final class DanmakuStageView: NSView {
     }
 
     private func laneGeometry() -> (count: Int, firstCenterFromTop: CGFloat, pitch: CGFloat) {
-        let height = metrics.height
+        let height = metrics.laneHeight(profilesShown: configuration.profilesShown)
         let region = configuration.area.region
         let count = region.laneCount(
             stageHeight: Double(bounds.height),
@@ -206,12 +213,13 @@ final class DanmakuStageView: NSView {
     }
 
     private func rendered(_ item: DanmakuItem, metrics: DanmakuMetrics) -> RenderedDanmaku? {
-        let key = "\(configuration.style.rawValue)-\(Int(metrics.fontSize * 10))-\(Int(scale * 10))-\(Int(bounds.width))"
+        let key = "\(configuration.style.rawValue)-\(configuration.profileSize.rawValue)-\(Int(metrics.fontSize * 10))-\(Int(scale * 10))-\(Int(bounds.width))"
         if item.renderKey == key, let cached = item.rendered { return cached }
         let rendered = DanmakuRenderer.render(
             item.content,
             style: configuration.style,
             fontSize: metrics.fontSize,
+            profileSize: configuration.profileSize,
             scale: scale,
             maxBodyWidth: bounds.width * 0.92
         )

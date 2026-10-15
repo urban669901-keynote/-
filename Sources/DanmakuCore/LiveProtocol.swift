@@ -78,11 +78,13 @@ public struct ServerMessage: Codable, Equatable {
     public var cooldown: Double?
     public var allowPhoto: Bool?
     public var nickname: String?
+    /// 大頭貼與暱稱的顯示大小（standard / large / extraLarge），手機預覽依此呈現
+    public var profileSize: String?
 
     public init(
         t: String, id: String? = nil, ok: Bool? = nil, code: String? = nil, state: String? = nil,
         message: String? = nil, retryAfter: Double? = nil, queue: Int? = nil, maxLength: Int? = nil,
-        cooldown: Double? = nil, allowPhoto: Bool? = nil, nickname: String? = nil
+        cooldown: Double? = nil, allowPhoto: Bool? = nil, nickname: String? = nil, profileSize: String? = nil
     ) {
         self.t = t
         self.id = id
@@ -96,6 +98,7 @@ public struct ServerMessage: Codable, Equatable {
         self.cooldown = cooldown
         self.allowPhoto = allowPhoto
         self.nickname = nickname
+        self.profileSize = profileSize
     }
 
     public func json() -> String {

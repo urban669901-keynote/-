@@ -20,6 +20,24 @@ enum DanmakuStyle: String, CaseIterable, Codable {
     }
 }
 
+/// 大頭貼與暱稱的大小。「大」與「特大」改為兩行：上行暱稱、下行訊息，大頭貼放大讓人像看得清楚。
+enum ProfileSize: String, CaseIterable, Codable {
+    /// 單行：小大頭貼 + 暱稱 + 訊息
+    case standard
+    /// 兩行，大頭貼約為單行的 1.7 倍（預設）
+    case large
+    /// 兩行，大頭貼超出膠囊上下緣，約為單行的 2.3 倍
+    case extraLarge
+
+    var title: String {
+        switch self {
+        case .standard: return "標準（單行）"
+        case .large: return "大"
+        case .extraLarge: return "特大"
+        }
+    }
+}
+
 enum QRPosition: String, CaseIterable, Codable {
     case bottomRight
     case bottomLeft
@@ -42,6 +60,7 @@ final class Settings: ObservableObject {
 
     enum Defaults {
         static let style = DanmakuStyle.glass
+        static let profileSize = ProfileSize.large
         static let fontSize = 48.0
         static let crossingSeconds = 10.0
         static let opacity = 1.0
@@ -68,6 +87,8 @@ final class Settings: ObservableObject {
     @Published var maxConcurrent: Int { didSet { save(maxConcurrent, "maxConcurrent") } }
     @Published var showNickname: Bool { didSet { save(showNickname, "showNickname") } }
     @Published var showAvatar: Bool { didSet { save(showAvatar, "showAvatar") } }
+    /// 大頭貼與暱稱大小（預設「大」）
+    @Published var profileSize: ProfileSize { didSet { save(profileSize.rawValue, "profileSize") } }
     @Published var allowPhotoAvatar: Bool { didSet { save(allowPhotoAvatar, "allowPhotoAvatar") } }
 
     // QR Code
@@ -109,6 +130,7 @@ final class Settings: ObservableObject {
         maxConcurrent = Int(Self.clamp(Double(store.object(forKey: "maxConcurrent") as? Int ?? Defaults.maxConcurrent), 1, 12))
         showNickname = store.object(forKey: "showNickname") as? Bool ?? true
         showAvatar = store.object(forKey: "showAvatar") as? Bool ?? true
+        profileSize = store.string(forKey: "profileSize").flatMap(ProfileSize.init(rawValue:)) ?? Defaults.profileSize
         allowPhotoAvatar = store.object(forKey: "allowPhotoAvatar") as? Bool ?? true
         qrVisible = store.object(forKey: "qrVisible") as? Bool ?? true
         qrPosition = store.string(forKey: "qrPosition").flatMap(QRPosition.init(rawValue:)) ?? .bottomRight
@@ -158,6 +180,7 @@ final class Settings: ObservableObject {
         maxConcurrent = Defaults.maxConcurrent
         showNickname = true
         showAvatar = true
+        profileSize = Defaults.profileSize
         qrSize = Defaults.qrSize
         qrPosition = .bottomRight
     }

@@ -100,6 +100,16 @@ for style in classic card; do
 done
 defaults write "${DOMAIN}" style -string glass
 
+# 大頭貼與暱稱大小：標準（單行）、特大（「大」是預設，上面三張樣式截圖就是「大」）
+for size in standard extraLarge; do
+  defaults write "${DOMAIN}" profileSize -string "${size}"
+  launch_app "profile-${size}" --start-session --demo || continue
+  sleep 6
+  shot "02-profile-${size}"
+  stop_app
+done
+defaults write "${DOMAIN}" profileSize -string large
+
 launch_app large-qr --start-session --large-qr || true
 sleep 3
 shot "03-large-qr"
@@ -190,7 +200,7 @@ reset_defaults
 # ---------------------------------------------------------------------------
 # CI 無法下載 Artifacts 時檢視截圖用：把縮小後的 JPEG 以 base64 印在 log 中
 if [[ "${PRINT_PREVIEWS:-0}" == "1" ]]; then
-  for name in 01-style-glass 02-style-classic 02-style-card 03-large-qr 04-control-panel 05-compatibility 20-phone 21-acceptance-over-fullscreen; do
+  for name in 01-style-glass 02-style-classic 02-style-card 02-profile-standard 02-profile-extraLarge 03-large-qr 04-control-panel 05-compatibility 20-phone 21-acceptance-over-fullscreen; do
     [[ -f "${OUT}/${name}.png" ]] || continue
     sips -s format jpeg -s formatOptions 65 -Z 1100 "${OUT}/${name}.png" --out "${OUT}/preview-${name}.jpg" >/dev/null 2>&1 || continue
     echo "=====BEGIN PREVIEW ${name}====="
