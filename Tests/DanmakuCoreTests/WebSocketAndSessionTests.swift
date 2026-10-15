@@ -78,6 +78,18 @@ final class WebSocketTests: XCTestCase {
         XCTAssertEqual(reader.consume(data).events, [.text(medium), .text(large)])
     }
 
+    func testKeepsPartialFrameAfterLargeMessage() {
+        // 照片大頭貼（約 70 KB）之後緊接著半個訊框：整理緩衝區時不能弄丟還沒收完的部分
+        var reader = WebSocketReader(maxMessageSize: 200_000)
+        let photo = String(repeating: "p", count: 70_000)
+        let next = clientFrame(.text, Data("早安 ☀️".utf8))
+        var chunk = clientFrame(.text, Data(photo.utf8))
+        chunk.append(next.prefix(4))
+        XCTAssertEqual(reader.consume(chunk).events, [.text(photo)])
+        XCTAssertEqual(reader.consume(next.dropFirst(4)).events, [.text("早安 ☀️")])
+        XCTAssertEqual(reader.consume(clientFrame(.text, Data("b".utf8))).events, [.text("b")])
+    }
+
     func testRejectsUnmaskedOversizedAndBadFrames() {
         var reader = WebSocketReader(maxMessageSize: 10)
         XCTAssertNotNil(reader.consume(WebSocket.textFrame("hi")).error, "伺服器格式（未遮罩）的訊框應被拒絕")
