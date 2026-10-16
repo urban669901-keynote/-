@@ -187,7 +187,9 @@ PowerPoint 也一樣測一次；PowerPoint 的保底做法是「投影片放映 
 - 想立刻停掉所有特效：按「清空彈幕」或 ⌃⌥⌘C。
 - 送了多少禮物會出現在「本場數據」、講師時段與「本月最佳講師」（排名仍然依票數或得票率，禮物只是顯示）。
 
-![火箭特效](images/gift-rocket.jpg)
+| 🚀 火箭 | 🎉 拉炮（很多人同時送） | 🎆 煙火 |
+| --- | --- | --- |
+| ![火箭](images/gift-rocket.jpg) | ![拉炮](images/gift-popper.jpg) | ![煙火](images/gift-fireworks.jpg) |
 
 ### 數據統計（「投票與統計」分頁）
 

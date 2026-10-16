@@ -173,33 +173,57 @@ final class GiftEffectsView: NSView {
         return 2.4
     }
 
-    /// 一團向四面八方散開、受重力下墜的火花。
+    /// 一朵煙火：中心閃光 + 一圈速度相近的發光火花（看起來是圓形綻放）+ 內層細碎亮點，受重力慢慢下墜。
     private func burst(at point: CGPoint, colors: [NSColor], strength: CGFloat) {
         guard let root = layer else { return }
         let u = unit
-        let cells = colors.map { color -> CAEmitterCell in
+        var cells = colors.map { color -> CAEmitterCell in
             let cell = CAEmitterCell()
-            cell.contents = Self.dotImage(scale: scale)
+            cell.contents = Self.softDotImage(scale: scale)
             cell.contentsScale = scale
-            cell.birthRate = Float(420 * strength)
-            cell.lifetime = 1.6
-            cell.lifetimeRange = 0.4
-            cell.velocity = 380 * u * strength
-            cell.velocityRange = 120 * u
+            cell.birthRate = Float(520 * strength)
+            cell.lifetime = 1.5
+            cell.lifetimeRange = 0.3
+            cell.velocity = 300 * u * strength
+            cell.velocityRange = 28 * u
             cell.emissionRange = .pi * 2
-            cell.yAcceleration = -260 * u
-            cell.scale = 0.42 * u
-            cell.scaleRange = 0.15 * u
-            cell.scaleSpeed = -0.12 * u
-            cell.alphaSpeed = -0.55
+            cell.yAcceleration = -150 * u
+            cell.scale = 0.6 * u
+            cell.scaleRange = 0.12 * u
+            cell.scaleSpeed = -0.25 * u
+            cell.alphaSpeed = -0.6
             cell.color = color.cgColor
             return cell
         }
+        let glitter = CAEmitterCell()
+        glitter.contents = Self.dotImage(scale: scale)
+        glitter.contentsScale = scale
+        glitter.birthRate = Float(500 * strength)
+        glitter.lifetime = 1.2
+        glitter.lifetimeRange = 0.4
+        glitter.velocity = 170 * u * strength
+        glitter.velocityRange = 120 * u
+        glitter.emissionRange = .pi * 2
+        glitter.yAcceleration = -150 * u
+        glitter.scale = 0.28 * u
+        glitter.alphaSpeed = -0.8
+        glitter.color = NSColor.white.cgColor
+        let flash = CAEmitterCell()
+        flash.contents = Self.softDotImage(scale: scale)
+        flash.contentsScale = scale
+        flash.birthRate = 30
+        flash.lifetime = 0.35
+        flash.velocity = 0
+        flash.scale = 4 * u * strength
+        flash.alphaSpeed = -2.8
+        flash.color = (colors.first ?? .white).cgColor
+        cells += [glitter, flash]
+
         let emitter = makeEmitter(cells: cells, additive: true)
         emitter.emitterPosition = point
         root.addSublayer(emitter)
         let current = generation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self, self.generation == current else { return }
             emitter.birthRate = 0
         }
