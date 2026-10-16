@@ -409,7 +409,9 @@ private struct StatisticsTab: View {
                         Text("換名 \(record.nicknameChanges) 次")
                         Spacer()
                         Text(record.turns.isEmpty ? "沒有講師投票" : record.turns.map { "\($0.speaker) \($0.votes) 票" }.joined(separator: "、"))
-                            .foregroundColor(.secondary).lineLimit(1)
+                            .foregroundColor(.secondary).lineLimit(1).truncationMode(.tail)
+                            .frame(maxWidth: 260, alignment: .trailing)
+                            .padding(.trailing, 6)
                     }
                     .font(.callout)
                 }

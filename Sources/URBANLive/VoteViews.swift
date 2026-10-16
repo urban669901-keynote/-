@@ -312,7 +312,8 @@ final class AnnouncementView: NSView {
     private func drawBestSpeaker(month: MonthKey, order: RankingOrder, ranks: [SpeakerRank], u: CGFloat) {
         let runnersUp = Array(ranks.dropFirst().prefix(4))
         let width = min(bounds.width * 0.82, 1180 * u)
-        let height = (ranks.isEmpty ? 560 : 640) * u + CGFloat(runnersUp.count) * 50 * u
+        let rows = CGFloat(runnersUp.count)
+        let height = (ranks.isEmpty ? 480 : 520) * u + rows * 50 * u + (rows > 0 ? 34 * u : 0)
         let card = NSRect(x: (bounds.width - width) / 2, y: (bounds.height - height) / 2, width: width, height: height)
         var y = drawCard(card, u: u) + 18 * u
         y = line(centered("🏆 本月最佳講師", size: 56 * u, weight: .heavy, color: Brand.deepSea), in: card, y: y)

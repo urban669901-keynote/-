@@ -24,7 +24,7 @@ Mac：URBAN LIVE（選單列 App）──AirPlay「鏡像顯示」──▶ Appl
 | 2. AirPlay 鏡像正常顯示 | `sharingType = .readOnly`，系統合成後原樣鏡像（CI 已截圖驗證圖層可被擷取） | 相同（底層一樣是 AppKit） |
 | 3. 不影響簡報操作 | 滑鼠穿透、不搶焦點、accessory App（不進 Dock） | 需外掛處理不搶焦點與 accessory 身分 |
 | 4. 手機即時發送 | Network.framework 內建 HTTP + WebSocket，零相依 | Rust 生態成熟（tokio / axum） |
-| 5. 穩定性 | 單一原生行程，約 2 MB，記憶體實測 200 人（各自上傳照片）最高 75 MB | WebView + Rust 行程，體積與記憶體較大 |
+| 5. 穩定性 | 單一原生行程，約 2 MB，記憶體實測 200 人（各自上傳照片、同時投票）最高 80 MB | WebView + Rust 行程，體積與記憶體較大 |
 | 6. 視覺 | Core Animation 在 WindowServer 端動畫，60 FPS 不受主執行緒影響 | WebView CSS 動畫，透明 WebView 在全螢幕 Space 上的行為需另外驗證 |
 
 **結論：採用方案 A。** 最重要的「蓋在全螢幕簡報上」只能靠 AppKit 的視窗 API 完成，用 Tauri 最後還是要寫原生外掛；
@@ -101,7 +101,7 @@ Keynote 實際用哪一種、會不會隨版本改變，無法從文件確定，
   他的彈幕要上螢幕時才以 ImageIO 解碼，解碼後的圖只留最近 24 張（LRU；同時最多 5 則在畫面上、12 則排隊，24 張足夠）。
   200 人都用照片時，照片本身約佔 10 MB（實測 200 張平均 50 KB），而不是全部解碼的 80 MB。
   WebSocket 讀取緩衝區在每則訊息處理完後釋放，不會讓每條連線一直留著約 70 KB 的照片訊息。
-  實測 200 人各自上傳不同照片：App 記憶體最高 75 MB（RSS），活動監視器約 40 MB（見 [TESTING.md](TESTING.md)）。
+  實測 200 人各自上傳不同照片：App 記憶體最高 80 MB（RSS），活動監視器約 40 MB（見 [TESTING.md](TESTING.md)）。
   兩行版面每則較高，下方 30% 區域的軌道會從 3 條變 2 條。
 - **字體**：系統字型粗體（英數為 SF Pro，中文自動使用蘋方），Emoji 為 Apple Color Emoji 彩色。
 - **大小**：以 1920×1080 為基準，設定 48 px 在 1080p 上就是 48 px；其他解析度等比例換算。
