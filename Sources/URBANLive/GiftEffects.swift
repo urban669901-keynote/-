@@ -166,7 +166,7 @@ final class GiftEffectsView: NSView {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.generation == current else { return }
                 let point = CGPoint(x: self.bounds.width * CGFloat.random(in: 0.15...0.85),
-                                    y: self.bounds.height * CGFloat.random(in: 0.5...0.85))
+                                    y: self.bounds.height * CGFloat.random(in: 0.42...0.72)) // 避開上方的字幕
                 self.burst(at: point, colors: palettes.randomElement()!, strength: 1)
             }
         }
