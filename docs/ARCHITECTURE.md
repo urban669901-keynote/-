@@ -123,6 +123,7 @@ WebSocket 文字訊息（JSON，`t` 為類型），完整定義在 `Sources/Danm
 | | `profile` | 更新暱稱 / 大頭貼 |
 | | `send`（id、text） | 送出彈幕 |
 | | `vote`（turn） | 按「講師超棒」；`turn` 是手機看到的講師時段，主持人已換人時回 `stale_turn` |
+| | `gift`（id、kind） | 免費送禮特效：`popper` / `fireworks` / `rocket` |
 | Mac → 手機 | `welcome` / `state` | 目前狀態（進行中 / 暫停 / 隱藏 / 結束）與限制，主持人操作時即時推送 |
 | | `ack`（ok、code、message、retryAfter） | **Mac 收到並排入顯示佇列**才回成功；被擋下會說明原因 |
 | | `shown` | 已出現在大螢幕 |
@@ -130,12 +131,14 @@ WebSocket 文字訊息（JSON，`t` 為類型），完整定義在 `Sources/Danm
 | | `speaker`（speaker、turn、votes、voted） | 主持人開始 / 換 / 結束講師投票（沒有 speaker = 結束） |
 | | `vote`（ok、code、votes、voted） | 投票結果：`voted` / `already_voted` / `no_speaker` / `stale_turn` |
 | | `votes`（turn、votes） | 票數更新，最多每秒廣播一次（200 人同時投票也只有幾次廣播） |
+| | `gift`（id、ok、code、remaining） | 送禮結果：`sent` / `quota_used` / `too_fast` / `busy` / `disabled` / `not_live` / `bad_gift` |
+| | `gifts`（每種禮物剩幾次） | 主持人開關送禮或調整次數時推送；沒有 `gifts` = 不開放 |
 | | `bye` | 場次結束 / 連結失效 / 被封鎖，手機停止重連並提示 |
 
 手機網頁只有在收到 `ack` 成功時才清空輸入框並顯示「已送出」；6 秒沒有回條就顯示失敗。
 WebSocket 斷線會以 0.8 → 1.6 → 3.2 … 秒（最多 10 秒）自動重連；連續失敗 4 次改用 HTTP 備援。
 
-HTTP 備援：`GET /api/status`（含目前講師與是否已投票）、`POST /api/send`、`POST /api/vote`。
+HTTP 備援：`GET /api/status`（含目前講師、是否已投票、禮物剩餘次數）、`POST /api/send`、`POST /api/vote`、`POST /api/gift`。
 
 ## 6.1 講師投票與數據統計
 
@@ -150,6 +153,17 @@ HTTP 備援：`GET /api/status`（含目前講師與是否已投票）、`POST /
   檔案損毀時會改名備份並重新開始，不影響 App 開啟。
 - **大螢幕**：票數膠囊貼在 QR Code 旁（`VoteBadgeView`，Core Animation；很多人同時投票時重畫合併成一次，👏 排隊飄出最多 16 個）；
   公布卡片（`AnnouncementView`）與大型 QR Code 同一種設計，清空彈幕（⌃⌥⌘C）時一起收起。
+
+## 6.2 送禮特效（免費）
+
+- 邏輯在 `Sources/DanmakuCore/Gifts.swift` 與 `SessionStatistics`（次數、冷卻、統計，有單元測試）；特效在 `Sources/URBANLive/GiftEffects.swift`。
+- **不涉及金錢**：沒有儲值、付款或金流，所以不需要對外伺服器或金流商。
+- 檢查順序：場次狀態（暫停 / 隱藏時不收）→ 主持人是否開放 → 每人每場次數（以 IP 代號計）→ 同一人 3 秒冷卻 → 大螢幕排隊是否已滿（30）→ 記錄並播放。被擋下的不扣次數。
+- 特效以 Core Animation 的 `CAEmitterLayer` 粒子產生（在 WindowServer / GPU 端合成）：
+  火箭 = 🚀 圖層沿路徑加速上升 + 跟著尾巴移動的火焰、火花、煙霧發射器（已噴出的粒子留在原地形成尾跡）+ 頂端金色爆炸；
+  煙火 = 三團放射狀火花受重力下墜；拉炮 = 兩側下角噴出旋轉的彩色紙片。
+- 排程：火箭一次一支；拉炮與煙火最多同時 4 個；其餘先進先出排隊。清空彈幕（⌃⌥⌘C）或結束場次時全部停止。
+- 禮物數量記在本場統計（`giftTotals`）與講師時段（`SpeakerTurn.gifts`），結束後只保留數字；新欄位皆為選用，舊版統計檔仍可讀取。
 
 ## 7. 安全與防濫用
 
