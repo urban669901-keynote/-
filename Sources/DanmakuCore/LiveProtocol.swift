@@ -7,6 +7,7 @@ import Foundation
 //   {"t":"profile","profile":{...}}                      更新暱稱 / 大頭貼
 //   {"t":"send","id":"m_1","text":"URBAN 今天衝三件 🔥"}
 //   {"t":"vote","turn":"abc123"}                         講師超棒投票（turn = 手機看到的講師時段）
+//   {"t":"gift","id":"g_1","kind":"rocket"}              免費送禮特效（popper / fireworks / rocket）
 //   {"t":"ping"}
 //
 // Mac → 手機
@@ -19,6 +20,8 @@ import Foundation
 //   {"t":"speaker","speaker":"王小明","turn":"abc123","votes":0,"voted":false}  主持人開始 / 結束講師投票（沒有 speaker = 結束）
 //   {"t":"vote","ok":true,"code":"voted","votes":23,"voted":true,...}           投票結果
 //   {"t":"votes","turn":"abc123","votes":24}              票數更新（最多每秒一次）
+//   {"t":"gift","id":"g_1","ok":true,"code":"sent","kind":"rocket","remaining":0,...}  送禮結果
+//   {"t":"gifts","gifts":{"popper":5,"fireworks":2,"rocket":1}}  主持人調整送禮設定（沒有 gifts = 不開放）
 //   {"t":"bye","code":"ended","message":"..."}            場次結束 / 連結失效 / 被封鎖
 
 public struct AvatarSpec: Codable, Equatable {
@@ -57,14 +60,20 @@ public struct ClientMessage: Codable, Equatable {
     public var text: String?
     /// 投票的講師時段
     public var turn: String?
+    /// 送禮的種類
+    public var kind: String?
 
-    public init(t: String, clientId: String? = nil, profile: ViewerProfile? = nil, id: String? = nil, text: String? = nil, turn: String? = nil) {
+    public init(
+        t: String, clientId: String? = nil, profile: ViewerProfile? = nil, id: String? = nil, text: String? = nil,
+        turn: String? = nil, kind: String? = nil
+    ) {
         self.t = t
         self.clientId = clientId
         self.profile = profile
         self.id = id
         self.text = text
         self.turn = turn
+        self.kind = kind
     }
 
     public static func decode(_ text: String) -> ClientMessage? {
@@ -92,12 +101,17 @@ public struct ServerMessage: Codable, Equatable {
     public var turn: String?
     public var votes: Int?
     public var voted: Bool?
+    /// 送禮：種類、這種禮物還剩幾次；`gifts` 為每種禮物還剩幾次（沒有 = 主持人沒有開放）
+    public var kind: String?
+    public var remaining: Int?
+    public var gifts: [String: Int]?
 
     public init(
         t: String, id: String? = nil, ok: Bool? = nil, code: String? = nil, state: String? = nil,
         message: String? = nil, retryAfter: Double? = nil, queue: Int? = nil, maxLength: Int? = nil,
         cooldown: Double? = nil, allowPhoto: Bool? = nil, nickname: String? = nil, profileSize: String? = nil,
-        speaker: String? = nil, turn: String? = nil, votes: Int? = nil, voted: Bool? = nil
+        speaker: String? = nil, turn: String? = nil, votes: Int? = nil, voted: Bool? = nil,
+        kind: String? = nil, remaining: Int? = nil, gifts: [String: Int]? = nil
     ) {
         self.t = t
         self.id = id
@@ -116,6 +130,9 @@ public struct ServerMessage: Codable, Equatable {
         self.turn = turn
         self.votes = votes
         self.voted = voted
+        self.kind = kind
+        self.remaining = remaining
+        self.gifts = gifts
     }
 
     public func json() -> String {
@@ -162,14 +179,18 @@ public struct APIResult: Codable, Equatable {
     public var retryAfter: Double?
     public var votes: Int?
     public var voted: Bool?
+    public var remaining: Int?
 
-    public init(ok: Bool, code: String, message: String, retryAfter: Double? = nil, votes: Int? = nil, voted: Bool? = nil) {
+    public init(
+        ok: Bool, code: String, message: String, retryAfter: Double? = nil, votes: Int? = nil, voted: Bool? = nil, remaining: Int? = nil
+    ) {
         self.ok = ok
         self.code = code
         self.message = message
         self.retryAfter = retryAfter
         self.votes = votes
         self.voted = voted
+        self.remaining = remaining
     }
 }
 

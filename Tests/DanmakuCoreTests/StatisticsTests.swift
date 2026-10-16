@@ -180,6 +180,68 @@ final class StatisticsTests: XCTestCase {
         XCTAssertEqual(SpeakerName.key("Amy Chen"), SpeakerName.key("ａｍｙ-chen"))
     }
 
+    // MARK: 送禮
+
+    func testGiftQuotaCooldownAndTotals() {
+        var stats = SessionStatistics(id: "s1", startedAt: date("2026-10-15T01:00:00Z"))
+        let t0 = date("2026-10-15T01:00:10Z")
+        XCTAssertEqual(stats.giftCheck(.rocket, person: "p1", quota: 1, at: t0), .sent(remaining: 0))
+        stats.recordGift(.rocket, person: "p1", at: t0)
+        XCTAssertEqual(stats.giftCheck(.rocket, person: "p1", quota: 1, at: t0.addingTimeInterval(10)), .quotaUsed, "火箭每場 1 次")
+        XCTAssertEqual(stats.giftCheck(.popper, person: "p1", quota: 5, at: t0.addingTimeInterval(1)), .tooFast(retryAfter: 2),
+                       "連續送禮至少間隔 3 秒")
+        XCTAssertEqual(stats.giftCheck(.popper, person: "p1", quota: 5, at: t0.addingTimeInterval(3.5)), .sent(remaining: 4))
+        XCTAssertEqual(stats.giftCheck(.popper, person: "p2", quota: 5, at: t0.addingTimeInterval(1)), .sent(remaining: 4), "冷卻時間每人分開算")
+        XCTAssertEqual(stats.giftCheck(.fireworks, person: "p2", quota: 0, at: t0), .disabled, "次數設為 0 = 不開放")
+
+        stats.startTurn(speaker: "王小明", online: 2, at: t0.addingTimeInterval(20))
+        stats.recordGift(.popper, person: "p2", at: t0.addingTimeInterval(21))
+        stats.recordGift(.popper, person: "p1", at: t0.addingTimeInterval(22))
+        XCTAssertEqual(stats.giftCount(.rocket), 1)
+        XCTAssertEqual(stats.giftCount(.popper), 2)
+        XCTAssertEqual(stats.totalGifts, 3)
+        XCTAssertEqual(stats.currentTurn?.giftCount(.popper), 2, "講師投票進行中時算進目前講師")
+        XCTAssertEqual(stats.currentTurn?.giftCount(.rocket), 0, "講師開始前送的不算給講師")
+        XCTAssertEqual(stats.giftsRemaining(for: "p1", quotas: [.popper: 5, .fireworks: 2, .rocket: 1]),
+                       ["popper": 4, "fireworks": 2, "rocket": 0])
+        XCTAssertEqual(stats.giftsRemaining(for: "p1", quotas: [.popper: 5, .rocket: 0]), ["popper": 4], "沒開放的禮物不出現")
+
+        let record = stats.record(endedAt: t0.addingTimeInterval(60))
+        XCTAssertEqual(record.giftCount(.popper), 2)
+        XCTAssertEqual(GiftSummary.text(record.gifts), "🚀 1　🎉 2")
+        let ranks = SpeakerRanking.rank(record.turns, month: MonthKey(year: 2026, month: 10), calendar: utc)
+        XCTAssertEqual(ranks.first?.gifts, ["popper": 2])
+    }
+
+    func testGiftReplyMessages() {
+        let sent = GiftOutcome.sent(remaining: 0).reply(id: "g1", kind: .rocket, speaker: "王小明")
+        XCTAssertEqual(sent.ok, true)
+        XCTAssertEqual(sent.code, "sent")
+        XCTAssertEqual(sent.kind, "rocket")
+        XCTAssertEqual(sent.remaining, 0)
+        XCTAssertEqual(sent.message, "🚀 火箭已送給 王小明，看大螢幕！")
+        let fast = GiftOutcome.tooFast(retryAfter: 1.2).reply(id: "g2", kind: .popper, speaker: nil)
+        XCTAssertEqual(fast.ok, false)
+        XCTAssertEqual(fast.retryAfter, 1.2)
+        XCTAssertEqual(fast.message, "送太快了，請等 2 秒")
+        XCTAssertEqual(GiftOutcome.busy.code, "busy")
+        XCTAssertNil(GiftSummary.text([:]))
+    }
+
+    func testArchiveFromBeforeGiftsStillLoads() throws {
+        // 加入送禮功能之前的統計檔（沒有 gifts 欄位）必須還能讀
+        let json = """
+        {"version":1,"sessions":[{"id":"s0","startedAt":"2026-10-01T01:00:00Z","endedAt":"2026-10-01T02:00:00Z",
+        "participants":30,"peakOnline":28,"senders":12,"messagesReceived":40,"messagesShown":35,"messagesBlocked":5,
+        "nicknameChanges":3,"turns":[{"id":"t0","speaker":"王小明","startedAt":"2026-10-01T01:10:00Z",
+        "endedAt":"2026-10-01T01:30:00Z","votes":20,"audience":28}]}]}
+        """
+        let archive = try StatisticsArchive.decode(Data(json.utf8))
+        XCTAssertEqual(archive.sessions.first?.turns.first?.votes, 20)
+        XCTAssertEqual(archive.sessions.first?.giftCount(.rocket), 0)
+        XCTAssertEqual(SpeakerRanking.rank(archive.allTurns, month: MonthKey(year: 2026, month: 10), calendar: utc).first?.gifts, [:])
+    }
+
     // MARK: 匯出
 
     func testCSVHasOneRowPerSpeakerAndEscapesFields() {
@@ -187,6 +249,7 @@ final class StatisticsTests: XCTestCase {
         stats.join("p1")
         stats.startTurn(speaker: "王小明, Kevin", online: 4, at: date("2026-10-15T01:05:00Z"))
         _ = stats.vote("p1", turnID: nil)
+        stats.recordGift(.fireworks, person: "p1", at: date("2026-10-15T01:06:00Z"))
         stats.startTurn(speaker: "=SUM(A1)", online: 4, at: date("2026-10-15T01:20:00Z"))
         var archive = StatisticsArchive(active: stats)
         archive.finishActive(at: date("2026-10-15T01:40:00Z"))
@@ -196,8 +259,9 @@ final class StatisticsTests: XCTestCase {
         let lines = csv.components(separatedBy: "\r\n").filter { !$0.isEmpty }
         XCTAssertEqual(lines.count, 4, "表頭 + 2 位講師 + 進行中的場次")
         XCTAssertEqual(lines[0], StatisticsCSV.header.joined(separator: ","))
-        XCTAssertTrue(lines[1].hasPrefix("2026-10-15,01:00,01:40,\"王小明, Kevin\",1,4,25%,1,"))
+        XCTAssertTrue(lines[1].hasPrefix("2026-10-15,01:00,01:40,\"王小明, Kevin\",1,4,25%,0,1,0,1,"), lines[1])
+        XCTAssertTrue(lines[1].hasSuffix(",0,1,0"), "本場禮物：火箭 0、煙火 1、拉炮 0")
         XCTAssertTrue(lines[2].contains(",'=SUM(A1),"), "公式開頭的內容加上 ' 避免被試算表執行")
-        XCTAssertTrue(lines[3].hasPrefix("2026-10-16,01:00,進行中,,,,,0,"))
+        XCTAssertTrue(lines[3].hasPrefix("2026-10-16,01:00,進行中,,,,,,,,0,"), lines[3])
     }
 }

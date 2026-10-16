@@ -51,15 +51,22 @@ public struct SpeakerTurn: Codable, Equatable, Identifiable {
     public var votes: Int
     /// 這段時間最多同時在線的人數（算得票率用）
     public var audience: Int
+    /// 這段時間收到的禮物（種類 → 數量）；舊版統計檔沒有這個欄位
+    public var gifts: [String: Int]?
 
-    public init(id: String, speaker: String, startedAt: Date, endedAt: Date? = nil, votes: Int = 0, audience: Int = 0) {
+    public init(
+        id: String, speaker: String, startedAt: Date, endedAt: Date? = nil, votes: Int = 0, audience: Int = 0, gifts: [String: Int]? = nil
+    ) {
         self.id = id
         self.speaker = speaker
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.votes = votes
         self.audience = audience
+        self.gifts = gifts
     }
+
+    public func giftCount(_ kind: GiftKind) -> Int { gifts?[kind.rawValue] ?? 0 }
 
     /// 得票率 = 票數 ÷ 在線人數（最多 100%）。
     public var voteRate: Double? {
@@ -124,6 +131,10 @@ public struct SessionStatistics: Codable, Equatable {
     public private(set) var turns: [SpeakerTurn] = []
     /// 目前這位講師已經投過票的人
     private var voters: Set<String> = []
+    /// 送禮：每個人各種禮物送了幾次、最後一次送禮時間（只在進行中的場次）；本場各種禮物總數
+    private var giftUsage: [String: [String: Int]]?
+    private var lastGiftAt: [String: Date]?
+    public private(set) var giftTotals: [String: Int]?
 
     public init(id: String = PersonKey.randomID(), startedAt: Date = Date()) {
         self.id = id
@@ -212,6 +223,58 @@ public struct SessionStatistics: Codable, Equatable {
         currentTurn != nil && voters.contains(person)
     }
 
+    // MARK: 送禮
+
+    public func giftCount(_ kind: GiftKind) -> Int { giftTotals?[kind.rawValue] ?? 0 }
+    public var totalGifts: Int { giftTotals?.values.reduce(0, +) ?? 0 }
+
+    public func giftsUsed(_ kind: GiftKind, by person: String) -> Int {
+        giftUsage?[person]?[kind.rawValue] ?? 0
+    }
+
+    /// 每種有開放的禮物還剩幾次（手機顯示用）。
+    public func giftsRemaining(for person: String, quotas: [GiftKind: Int]) -> [String: Int] {
+        var remaining: [String: Int] = [:]
+        for kind in GiftKind.allCases {
+            let quota = quotas[kind] ?? 0
+            guard quota > 0 else { continue }
+            remaining[kind.rawValue] = max(0, quota - giftsUsed(kind, by: person))
+        }
+        return remaining
+    }
+
+    /// 檢查能不能送（不記錄）：次數、冷卻時間。可以送時回傳 `.sent(remaining:)`。
+    public func giftCheck(_ kind: GiftKind, person: String, quota: Int, at date: Date = Date()) -> GiftOutcome {
+        guard quota > 0 else { return .disabled }
+        let used = giftsUsed(kind, by: person)
+        guard used < quota else { return .quotaUsed }
+        if let last = lastGiftAt?[person] {
+            let elapsed = date.timeIntervalSince(last)
+            if elapsed < GiftKind.cooldown { return .tooFast(retryAfter: GiftKind.cooldown - elapsed) }
+        }
+        return .sent(remaining: quota - used - 1)
+    }
+
+    /// 記錄一份已送出的禮物（講師投票進行中時也算進目前講師）。
+    public mutating func recordGift(_ kind: GiftKind, person: String, at date: Date = Date()) {
+        var usage = giftUsage ?? [:]
+        usage[person, default: [:]][kind.rawValue, default: 0] += 1
+        giftUsage = usage
+        var lastTimes = lastGiftAt ?? [:]
+        lastTimes[person] = date
+        lastGiftAt = lastTimes
+        var totals = giftTotals ?? [:]
+        totals[kind.rawValue, default: 0] += 1
+        giftTotals = totals
+        if currentTurn != nil {
+            let index = turns.count - 1
+            var gifts = turns[index].gifts ?? [:]
+            gifts[kind.rawValue, default: 0] += 1
+            turns[index].gifts = gifts
+        }
+        updatedAt = date
+    }
+
     /// 場次結束時保存的紀錄：只有數字與講師姓名。
     public func record(endedAt: Date) -> SessionRecord {
         var closed = turns
@@ -222,7 +285,7 @@ public struct SessionStatistics: Codable, Equatable {
             id: id, startedAt: startedAt, endedAt: endedAt,
             participants: participants.count, peakOnline: peakOnline, senders: senders.count,
             messagesReceived: messagesReceived, messagesShown: messagesShown, messagesBlocked: messagesBlocked,
-            nicknameChanges: nicknameChanges, turns: closed
+            nicknameChanges: nicknameChanges, turns: closed, gifts: giftTotals
         )
     }
 }
@@ -241,8 +304,11 @@ public struct SessionRecord: Codable, Equatable, Identifiable {
     public var messagesBlocked: Int
     public var nicknameChanges: Int
     public var turns: [SpeakerTurn]
+    /// 本場各種禮物的數量；舊版統計檔沒有這個欄位
+    public var gifts: [String: Int]?
 
     public var totalVotes: Int { turns.reduce(0) { $0 + $1.votes } }
+    public func giftCount(_ kind: GiftKind) -> Int { gifts?[kind.rawValue] ?? 0 }
 }
 
 /// 存在 Mac 上的統計檔（JSON）。
@@ -339,6 +405,8 @@ public struct SpeakerRank: Equatable, Identifiable {
     public let votes: Int
     public let turns: Int
     public let audience: Int
+    /// 這個月收到的禮物（種類 → 數量）
+    public let gifts: [String: Int]
 
     public var voteRate: Double? {
         audience > 0 ? min(1, Double(votes) / Double(audience)) : nil
@@ -353,10 +421,14 @@ public enum SpeakerRanking {
         let grouped = Dictionary(grouping: inMonth) { SpeakerName.key($0.speaker) }
         let ranks = grouped.map { key, group -> SpeakerRank in
             let latest = group.max { $0.startedAt < $1.startedAt }!
+            var gifts: [String: Int] = [:]
+            for turn in group {
+                for (kind, count) in turn.gifts ?? [:] { gifts[kind, default: 0] += count }
+            }
             return SpeakerRank(
                 key: key, name: latest.speaker,
                 votes: group.reduce(0) { $0 + $1.votes }, turns: group.count,
-                audience: group.reduce(0) { $0 + $1.audience }
+                audience: group.reduce(0) { $0 + $1.audience }, gifts: gifts
             )
         }
         return ranks.sorted { lhs, rhs in
@@ -384,8 +456,9 @@ public enum SpeakerRanking {
 
 public enum StatisticsCSV {
     public static let header = [
-        "日期", "場次開始", "場次結束", "講師", "講師得票", "投票時在線人數", "得票率",
+        "日期", "場次開始", "場次結束", "講師", "講師得票", "投票時在線人數", "得票率", "講師收到火箭", "講師收到煙火", "講師收到拉炮",
         "本場參與人數", "本場最高同時在線", "本場發言人數", "本場收到彈幕", "本場上螢幕", "本場擋下", "本場換名次數",
+        "本場火箭", "本場煙火", "本場拉炮",
     ]
 
     /// 每位講師一列（沒有講師的場次也有一列），Excel / Numbers 可直接做樞紐分析。
@@ -403,14 +476,16 @@ public enum StatisticsCSV {
                 String(record.participants), String(record.peakOnline), String(record.senders),
                 String(record.messagesReceived), String(record.messagesShown), String(record.messagesBlocked),
                 String(record.nicknameChanges),
+                String(record.giftCount(.rocket)), String(record.giftCount(.fireworks)), String(record.giftCount(.popper)),
             ]
             let base = [day.string(from: record.startedAt), time.string(from: record.startedAt), isActive ? "進行中" : time.string(from: record.endedAt)]
             if record.turns.isEmpty {
-                rows.append(base + ["", "", "", ""] + session)
+                rows.append(base + Array(repeating: "", count: 7) + session)
             }
             for turn in record.turns {
                 let rate = turn.voteRate.map { String(format: "%.0f%%", $0 * 100) } ?? ""
-                rows.append(base + [turn.speaker, String(turn.votes), String(turn.audience), rate] + session)
+                let gifts = [String(turn.giftCount(.rocket)), String(turn.giftCount(.fireworks)), String(turn.giftCount(.popper))]
+                rows.append(base + [turn.speaker, String(turn.votes), String(turn.audience), rate] + gifts + session)
             }
         }
         return rows.map { $0.map(escape).joined(separator: ",") }.joined(separator: "\r\n") + "\r\n"
