@@ -106,6 +106,10 @@ final class QRCardView: NSView {
 final class LargeQRView: NSView {
     private(set) var url: String?
     private var qrImage: CGImage?
+    /// 本場已加入的人數（開場時顯示，鼓勵大家掃描）
+    var joinedCount = 0 {
+        didSet { if joinedCount != oldValue { needsDisplay = true } }
+    }
 
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -125,7 +129,7 @@ final class LargeQRView: NSView {
         let u = bounds.height / 1080
         let qrSide = min(bounds.height * 0.5, bounds.width * 0.4)
         let cardWidth = qrSide + 120 * u
-        let cardHeight = qrSide + 300 * u
+        let cardHeight = qrSide + 350 * u
         let card = NSRect(x: (bounds.width - cardWidth) / 2, y: (bounds.height - cardHeight) / 2, width: cardWidth, height: cardHeight)
         let path = NSBezierPath(roundedRect: card, xRadius: 36 * u, yRadius: 36 * u)
 
@@ -161,6 +165,14 @@ final class LargeQRView: NSView {
         if let url {
             centered(url, font: NSFont.monospacedSystemFont(ofSize: 18 * u, weight: .medium), color: NSColor(white: 0.4, alpha: 1))
                 .draw(in: NSRect(x: card.minX + 10, y: qrRect.maxY + 66 * u, width: card.width - 20, height: 26 * u))
+        }
+        if joinedCount > 0 {
+            let joined = centered("👥 已加入 \(joinedCount) 人", font: NSFont.systemFont(ofSize: 28 * u, weight: .heavy), color: Brand.deepSea)
+            let size = NSSize(width: joined.size().width + 48 * u, height: 48 * u)
+            let pill = NSRect(x: card.midX - size.width / 2, y: qrRect.maxY + 106 * u, width: size.width, height: size.height)
+            NSColor(hex: 0xF3C969).setFill()
+            NSBezierPath(roundedRect: pill, xRadius: size.height / 2, yRadius: size.height / 2).fill()
+            joined.draw(in: NSRect(x: pill.minX, y: pill.midY - joined.size().height / 2, width: pill.width, height: joined.size().height))
         }
     }
 }

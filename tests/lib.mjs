@@ -100,6 +100,22 @@ export class Phone {
     }
   }
 
+  /** 按「講師超棒」，回傳 Mac 的回覆（null 代表逾時）。 */
+  async vote(turn, timeoutMs = 5000) {
+    const before = this.messages.length;
+    const sentAt = performance.now();
+    this.ws.send(JSON.stringify({ t: 'vote', turn }));
+    const reply = await this.waitFor((m) => m.t === 'vote' && this.messages.indexOf(m) >= before, timeoutMs).catch(() => null);
+    if (reply) reply.latency = reply.receivedAt - sentAt;
+    return reply;
+  }
+
+  /** 更新暱稱 / 大頭貼（與手機網頁「儲存」相同）。 */
+  updateProfile(nickname) {
+    this.nickname = nickname;
+    this.ws.send(JSON.stringify({ t: 'profile', profile: { nickname, avatar: this.avatar } }));
+  }
+
   shownAt(id) {
     const shown = this.messages.find((m) => m.t === 'shown' && m.id === id);
     return shown ? shown.receivedAt : null;

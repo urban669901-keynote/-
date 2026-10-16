@@ -1,6 +1,7 @@
 // 協定測試：對執行中的 URBAN LIVE App 實際連線（不是模擬伺服器）。
-//   node protocol-test.mjs --base http://127.0.0.1:8765 --token ABCD2345 [--aliases]
+//   node protocol-test.mjs --base http://127.0.0.1:8765 --token ABCD2345 [--aliases] [--speaker 測試講師]
 // --aliases：使用 127.0.0.2 起的本機別名，模擬多支不同 IP 的手機（CI 會先建立別名）。
+// --speaker：App 以 --speaker 啟動時，一併測試「講師超棒」投票。
 import http from 'node:http';
 import { Checklist, Phone, parseArgs, sleep } from './lib.mjs';
 
@@ -119,6 +120,40 @@ garbage.ws.send('not json');
 garbage.ws.send(JSON.stringify({ t: 'send', id: '<script>', text: 'id 含特殊字元' }));
 const garbageAck = await garbage.waitFor((m) => m.t === 'ack', 3000).catch(() => null);
 list.check(garbageAck && /^m\d+$/.test(garbageAck.id), '不合法的 JSON 被忽略、不合法的 id 被替換', JSON.stringify(garbageAck));
+
+// ---------- 講師超棒投票 ----------
+if (args.speaker) {
+  list.check(welcome.speaker === args.speaker && typeof welcome.turn === 'string' && welcome.voted === false && welcome.votes === 0,
+    'welcome 帶有目前的講師與投票狀態', JSON.stringify({ speaker: welcome.speaker, turn: welcome.turn, votes: welcome.votes, voted: welcome.voted }));
+  const v1 = await kevin.vote(welcome.turn);
+  list.check(v1 && v1.ok === true && v1.code === 'voted' && v1.votes === 1 && v1.voted === true,
+    `投票成功、Mac 回覆票數（${v1 ? v1.latency.toFixed(1) : '-'} ms）`, JSON.stringify(v1));
+  const v2 = await kevin.vote(welcome.turn);
+  list.check(v2 && v2.ok === false && v2.code === 'already_voted' && v2.votes === 1, '同一人不能重複投同一位講師', JSON.stringify(v2));
+  const stale = await kevin.vote('oldturn1');
+  list.check(stale && stale.code === 'stale_turn', '按到上一位講師的按鈕不算，並重新告知目前講師', JSON.stringify(stale));
+  const status = JSON.parse((await request('GET', `/api/status?s=${args.token}`, null, kevin.localAddress)).body);
+  list.check(status.speaker === args.speaker && status.voted === true, '狀態查詢（HTTP 備援）帶有講師與「已投票」', JSON.stringify(status));
+
+  // 換名：送出不同暱稱（Mac 統計換名次數；重複送同一個不算）
+  kevin.updateProfile('Kevin 大帥哥');
+  kevin.updateProfile('Kevin 大帥哥');
+  kevin.updateProfile('Kevin');
+  await sleep(300);
+
+  if (args.aliases) {
+    const v3 = await photo.vote(welcome.turn);
+    list.check(v3 && v3.ok === true && v3.votes === 2, '另一支手機投票，票數累加', JSON.stringify(v3));
+    const sameIP = await request('POST', '/api/vote', { session: args.token, clientId: 'c_other', turn: welcome.turn }, photo.localAddress);
+    list.check(sameIP.status === 409 && JSON.parse(sameIP.body).code === 'already_voted', '同一個 IP 換裝置識別碼也不能重複投票（HTTP）', sameIP.body);
+    const httpVote = await request('POST', '/api/vote', { session: args.token, clientId: 'c_httpvote', turn: welcome.turn }, nextAddress());
+    list.check(httpVote.status === 200 && JSON.parse(httpVote.body).votes === 3, 'HTTP 備援通道也能投票', httpVote.body);
+    const wrongVote = await request('POST', '/api/vote', { session: 'WRONG234', turn: welcome.turn }, nextAddress());
+    list.check(wrongVote.status === 403, '投票也會驗證場次', `HTTP ${wrongVote.status}`);
+    const update = await kevin.waitFor((m) => m.t === 'votes' && m.votes === 3, 4000).catch(() => null);
+    list.check(Boolean(update), '其他手機會收到票數更新（每秒最多一次）', JSON.stringify(kevin.messages.filter((m) => m.t === 'votes').slice(-1)));
+  }
+}
 
 [kevin, other, photo, flood, garbage, stranger].forEach((phone) => phone.close());
 list.finish();

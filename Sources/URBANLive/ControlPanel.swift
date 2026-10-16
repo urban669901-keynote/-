@@ -1,23 +1,31 @@
 import AppKit
 import DanmakuCore
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// 控制面板：四個分頁，關閉後彈幕服務仍在背景執行（選單列可隨時再打開）。
+/// 控制面板：五個分頁，關閉後彈幕服務仍在背景執行（選單列可隨時再打開）。
 struct ControlPanelView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var settings: Settings
     var openCompatibilityTest: () -> Void
 
     var body: some View {
-        TabView {
+        TabView(selection: $model.panelTab) {
             SessionTab(model: model, settings: settings)
                 .tabItem { Text("場次") }
+                .tag("session")
             AppearanceTab(model: model, settings: settings)
                 .tabItem { Text("外觀與預覽") }
+                .tag("appearance")
+            StatisticsTab(model: model, settings: settings)
+                .tabItem { Text("投票與統計") }
+                .tag("stats")
             ModerationTab(model: model, settings: settings)
                 .tabItem { Text("管理") }
+                .tag("moderation")
             AdvancedTab(model: model, settings: settings, openCompatibilityTest: openCompatibilityTest)
                 .tabItem { Text("快捷鍵與進階") }
+                .tag("advanced")
         }
         .padding(16)
         .frame(width: 760, height: 660)
@@ -152,6 +160,10 @@ private struct SessionTab: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                GroupBox(label: Label("講師超棒投票", systemImage: "hand.thumbsup")) {
+                    VoteControls(model: model, settings: settings)
+                }
+
                 GroupBox(label: Label("即時狀態", systemImage: "chart.bar")) {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 10) {
                         StatTile(title: "連線中的手機", value: model.stats.connected)
@@ -194,6 +206,249 @@ private struct StatTile: View {
             Text(title).font(.caption).foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - 講師投票
+
+private struct VoteControls: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var settings: Settings
+    @State private var name = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let turn = model.currentTurn {
+                HStack(spacing: 14) {
+                    Text("🎤 \(turn.speaker)").font(.title3).bold()
+                    Text("👏 \(turn.votes) 票").font(.title3).bold().monospacedDigit()
+                        .foregroundColor(Color(nsColor: Brand.royalBlue))
+                    Text(rateText(turn)).foregroundColor(.secondary)
+                    Spacer()
+                    Button("結束投票") { model.stopVoting() }
+                }
+            }
+            HStack(spacing: 8) {
+                TextField(model.currentTurn == nil ? "講師姓名" : "下一位講師姓名", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 220)
+                    .onSubmit(start)
+                if !model.recentSpeakers.isEmpty {
+                    Menu("最近的講師") {
+                        ForEach(model.recentSpeakers, id: \.self) { speaker in
+                            Button(speaker) { name = speaker }
+                        }
+                    }
+                    .frame(width: 130)
+                }
+                Button(model.currentTurn == nil ? "開始投票" : "換這位講師", action: start)
+                    .disabled(model.session == nil || SpeakerName.clean(name) == nil)
+            }
+            Toggle("大螢幕顯示票數（有人投票時會飄出 👏）", isOn: $settings.showVoteBadge)
+            Text(model.session == nil
+                 ? "先按「開始彈幕」才能開始投票。"
+                 : "同仁手機上會出現「👏 講師超棒」按鈕，每個人對每位講師可以投一次。換下一位講師時直接輸入新名字。")
+                .font(.caption).foregroundColor(.secondary)
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func rateText(_ turn: SpeakerTurn) -> String {
+        guard let rate = turn.voteRate else { return "在場 \(turn.audience) 人" }
+        return "在場 \(turn.audience) 人 · 得票率 \(Int((rate * 100).rounded()))%"
+    }
+
+    private func start() {
+        guard model.session != nil, SpeakerName.clean(name) != nil else { return }
+        model.startVoting(for: name)
+        name = ""
+    }
+}
+
+// MARK: - 投票與統計
+
+private struct StatisticsTab: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var settings: Settings
+    @State private var month = MonthKey(Date())
+
+    private var ranks: [SpeakerRank] { model.ranking(for: month) }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if model.announcement != nil {
+                    HStack {
+                        Text("大螢幕正在顯示公布卡片").bold()
+                        Spacer()
+                        Button("收起大螢幕上的卡片") { model.hideAnnouncement() }
+                            .keyboardShortcut(.cancelAction)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.15)))
+                }
+
+                GroupBox(label: Label("本場數據", systemImage: "person.3")) {
+                    sessionSection.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox(label: Label("本月最佳講師", systemImage: "trophy")) {
+                    rankingSection.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox(label: Label("過去的場次", systemImage: "calendar")) {
+                    historySection.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox(label: Label("資料", systemImage: "externaldrive")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("統計只存在這台 Mac：人數、彈幕數量、講師姓名與票數。不保存訊息內容、照片、暱稱或 IP。")
+                            .font(.callout).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button("匯出 CSV…", action: exportCSV)
+                            Button("在 Finder 中顯示") {
+                                NSWorkspace.shared.activateFileViewerSelecting([model.statisticsFileURL])
+                            }
+                            Spacer()
+                            Button("清除過去的紀錄…", action: confirmClear)
+                                .disabled(model.history.isEmpty)
+                        }
+                    }
+                    .padding(6)
+                }
+            }
+            .padding(4)
+        }
+    }
+
+    @ViewBuilder private var sessionSection: some View {
+        if let stats = model.sessionStats {
+            VStack(alignment: .leading, spacing: 10) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 10) {
+                    StatTile(title: "參與人數", value: stats.participantCount)
+                    StatTile(title: "最高同時在線", value: stats.peakOnline)
+                    StatTile(title: "發過彈幕的人", value: stats.senderCount)
+                    StatTile(title: "彈幕上螢幕", value: stats.messagesShown)
+                    StatTile(title: "講師超棒票數", value: stats.totalVotes)
+                    StatTile(title: "換名次數 XD", value: stats.nicknameChanges)
+                }
+                if let renamer = stats.topRenamer {
+                    Text("👑 換名王：\(renamer.display)（換了 \(renamer.changes) 次）")
+                }
+                ForEach(stats.turns) { turn in
+                    HStack {
+                        Text("🎤 \(turn.speaker)").bold()
+                        if turn.endedAt == nil { Text("投票中").font(.caption).foregroundColor(.green) }
+                        Spacer()
+                        Text("\(turn.votes) 票").monospacedDigit()
+                        Text("在場 \(turn.audience) 人").foregroundColor(.secondary).frame(width: 90, alignment: .trailing)
+                    }
+                }
+                Button("在大螢幕顯示本場數據") { model.showSessionSummary() }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("開始彈幕後，這裡會統計參與人數、最高同時在線、彈幕數、講師票數與換名次數。")
+                    .foregroundColor(.secondary)
+                if !model.history.isEmpty {
+                    Button("在大螢幕顯示上一場的數據") { model.showSessionSummary() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var rankingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Picker("月份", selection: $month) {
+                    ForEach(model.rankingMonths, id: \.self) { key in
+                        Text(key.title).tag(key)
+                    }
+                }
+                .frame(width: 200)
+                Picker("", selection: $settings.rankingOrder) {
+                    ForEach(RankingOrder.allCases, id: \.self) { order in
+                        Text(order.title).tag(order)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+            }
+            if ranks.isEmpty {
+                Text("這個月還沒有講師投票紀錄。").foregroundColor(.secondary)
+            } else {
+                ForEach(Array(ranks.prefix(10).enumerated()), id: \.element.id) { index, rank in
+                    HStack {
+                        Text(Self.medal(index)).frame(width: 34)
+                        Text(rank.name).bold()
+                        Spacer()
+                        Text("\(rank.votes) 票").monospacedDigit().frame(width: 70, alignment: .trailing)
+                        Text("分享 \(rank.turns) 次").frame(width: 80, alignment: .trailing)
+                        Text(rank.voteRate.map { "得票率 \(Int(($0 * 100).rounded()))%" } ?? "—")
+                            .foregroundColor(.secondary).frame(width: 100, alignment: .trailing)
+                    }
+                }
+            }
+            Button("在大螢幕公布本月最佳講師") { model.showBestSpeaker(month: month) }
+            Text("排名包含進行中的場次；同一位講師名字的全形半形、大小寫、空白不同會自動合併。「依得票率」= 票數 ÷ 投票時在場人數，講一次的講師也能公平比較。")
+                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private var historySection: some View {
+        if model.history.isEmpty {
+            Text("還沒有已結束的場次。按「結束場次」後會保存在這裡。").foregroundColor(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(model.history.suffix(8).reversed())) { record in
+                    HStack {
+                        Text(Self.dateText(record.startedAt)).monospacedDigit().frame(width: 110, alignment: .leading)
+                        Text("參與 \(record.participants) 人")
+                        Text("彈幕 \(record.messagesShown) 則")
+                        Text("換名 \(record.nicknameChanges) 次")
+                        Spacer()
+                        Text(record.turns.isEmpty ? "沒有講師投票" : record.turns.map { "\($0.speaker) \($0.votes) 票" }.joined(separator: "、"))
+                            .foregroundColor(.secondary).lineLimit(1)
+                    }
+                    .font(.callout)
+                }
+            }
+        }
+    }
+
+    private static func medal(_ index: Int) -> String {
+        ["🥇", "🥈", "🥉"].indices.contains(index) ? ["🥇", "🥈", "🥉"][index] : "\(index + 1)"
+    }
+
+    private static func dateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func exportCSV() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = String(format: "URBAN-LIVE-統計-%04d-%02d.csv", month.year, month.month)
+        panel.allowedContentTypes = [.commaSeparatedText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try model.exportStatistics(to: url)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    private func confirmClear() {
+        let alert = NSAlert()
+        alert.messageText = "清除過去的統計紀錄？"
+        alert.informativeText = "已結束場次的數據與本月最佳講師排行會被刪除，無法復原。進行中的場次不受影響。建議先「匯出 CSV」備份。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "清除")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            model.clearHistory()
+        }
     }
 }
 

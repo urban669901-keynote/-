@@ -50,6 +50,7 @@ const connectResults = await Promise.allSettled(phones.map(async (phone) => {
   await phone.connect(10000);
   const welcome = await phone.hello();
   if (welcome.t !== 'welcome') throw new Error(`收到 ${welcome.t}`);
+  phone.welcome = welcome;
   return performance.now() - started;
 }));
 const connected = connectResults.filter((r) => r.status === 'fulfilled');
@@ -62,6 +63,41 @@ summary.connect = {
 };
 console.log(`  成功 ${summary.connect.succeeded}、失敗 ${summary.connect.failed}，全部完成 ${summary.connect.allConnectedInMs} ms`);
 const live = phones.filter((_, i) => connectResults[i].status === 'fulfilled');
+
+// ---------- 1b. 講師超棒：全部的人同一瞬間按讚（App 以 --speaker 啟動時） ----------
+const turn = live[0] && live[0].welcome.turn;
+if (turn) {
+  console.log(`▶ ${live.length} 人同一瞬間按「講師超棒」（講師：${live[0].welcome.speaker}）…`);
+  const voteStart = performance.now();
+  const votes = await Promise.all(live.map((phone) => phone.vote(turn)));
+  const voteDone = performance.now() - voteStart;
+  console.log('VOTE_BURST_DONE');
+  const again = await Promise.all(live.slice(0, 20).map((phone) => phone.vote(turn)));
+  await sleep(2200); // 票數更新每秒最多廣播一次
+  const finalCounts = live.map((phone) => {
+    const updates = phone.messages.filter((m) => m.t === 'votes' && m.turn === turn);
+    return updates.length ? updates[updates.length - 1].votes : null;
+  });
+  summary.vote = {
+    outcomes: votes.reduce((acc, r) => { const key = r ? r.code : 'no_reply'; acc[key] = (acc[key] || 0) + 1; return acc; }, {}),
+    allRepliesInMs: Math.round(voteDone),
+    latencyMs: stats(votes.filter(Boolean).map((r) => r.latency)),
+    maxReportedVotes: Math.max(0, ...votes.filter(Boolean).map((r) => r.votes || 0)),
+    secondVoteRejected: again.filter((r) => r && r.code === 'already_voted').length,
+    phonesSeeingFinalCount: finalCounts.filter((count) => count === live.length).length,
+  };
+  console.log(`  結果：${JSON.stringify(summary.vote.outcomes)}，全部回覆 ${summary.vote.allRepliesInMs} ms；回覆延遲 p50 ${summary.vote.latencyMs.p50} ms、p95 ${summary.vote.latencyMs.p95} ms`);
+  console.log(`  再按一次被擋下：${summary.vote.secondVoteRejected} / 20；收到最終票數 ${live.length} 的手機：${summary.vote.phonesSeeingFinalCount} / ${live.length}`);
+
+  // 換名 XD：20 個人各換 2 次名字，第 1 個人多換 1 次（換名王）
+  live.slice(0, 20).forEach((phone, i) => {
+    const base = phone.nickname;
+    phone.updateProfile(`${base}改`);
+    phone.updateProfile(`${base}又改`);
+    if (i === 0) phone.updateProfile('換名王本人');
+  });
+  summary.renames = 41;
+}
 
 // ---------- 2. 一般互動：200 人在線，全場平均每 3 秒有人送一則 ----------
 const normalSeconds = Number(args.normal);
@@ -143,6 +179,12 @@ if (args.out) fs.writeFileSync(args.out, JSON.stringify(summary, null, 2));
 // ---------- 判定 ----------
 const problems = [];
 if (summary.connect.failed > 0) problems.push(`${summary.connect.failed} 支手機連線失敗`);
+if (summary.vote) {
+  if ((summary.vote.outcomes.voted || 0) !== live.length) problems.push(`講師投票只有 ${summary.vote.outcomes.voted || 0} / ${live.length} 票成功`);
+  if (summary.vote.maxReportedVotes !== live.length) problems.push(`回覆的最高票數 ${summary.vote.maxReportedVotes} ≠ ${live.length}`);
+  if (summary.vote.secondVoteRejected !== 20) problems.push('重複投票沒有被擋下');
+  if (summary.vote.phonesSeeingFinalCount !== live.length) problems.push(`只有 ${summary.vote.phonesSeeingFinalCount} 支手機收到最終票數`);
+}
 const noAck = (summary.normal.outcomes.no_ack || 0) + (summary.burst.outcomes.no_ack || 0) + (summary.sustained.outcomes.no_ack || 0);
 if ((summary.normal.ackLatencyMs.p95 ?? 0) > 1000) problems.push(`一般互動回條 p95 超過 1 秒`);
 if (summary.normal.shown < (summary.normal.outcomes.accepted || 0)) problems.push(`一般互動有 ${(summary.normal.outcomes.accepted || 0) - summary.normal.shown} 則被接受卻沒有顯示`);

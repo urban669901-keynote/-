@@ -104,6 +104,12 @@ final class Settings: ObservableObject {
     @Published var blockedWords: [String] { didSet { save(blockedWords, "blockedWords") } }
     @Published var sessionHours: Double { didSet { save(sessionHours, "sessionHours") } }
 
+    // 講師投票與統計
+    /// 大螢幕右上角顯示「講師超棒」票數
+    @Published var showVoteBadge: Bool { didSet { save(showVoteBadge, "showVoteBadge") } }
+    /// 本月最佳講師的排名方式
+    @Published var rankingOrder: RankingOrder { didSet { save(rankingOrder.rawValue, "rankingOrder") } }
+
     // 進階
     @Published var levelMode: WindowLevelMode { didSet { save(levelMode.rawValue, "windowLevelMode") } }
     @Published var preferredInterface: String? { didSet { save(preferredInterface, "preferredInterface") } }
@@ -140,6 +146,8 @@ final class Settings: ObservableObject {
         duplicateWindow = Self.clamp(store.object(forKey: "duplicateWindow") as? Double ?? Defaults.duplicateWindow, 0, 600)
         blockedWords = store.stringArray(forKey: "blockedWords") ?? ContentFilter.defaultWords
         sessionHours = Self.clamp(store.object(forKey: "sessionHours") as? Double ?? Defaults.sessionHours, 0.5, 12)
+        showVoteBadge = store.object(forKey: "showVoteBadge") as? Bool ?? true
+        rankingOrder = store.string(forKey: "rankingOrder").flatMap(RankingOrder.init(rawValue:)) ?? .votes
         levelMode = store.string(forKey: "windowLevelMode").flatMap(WindowLevelMode.init(rawValue:)) ?? .auto
         preferredInterface = store.string(forKey: "preferredInterface")
         externalBaseURL = store.string(forKey: "externalBaseURL") ?? ""

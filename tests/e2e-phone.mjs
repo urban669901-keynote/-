@@ -1,6 +1,6 @@
 // 端對端測試：用真的瀏覽器（Google Chrome，模擬 iPhone）打開 QR Code 網址，
 // 設定暱稱與大頭貼、輸入「URBAN 今天衝三件 🔥」並發送，等待 Mac 回報「已上大螢幕」。
-//   node e2e-phone.mjs --url http://192.168.1.23:8765/j/ABCD2345 --shot phone.png
+//   node e2e-phone.mjs --url http://192.168.1.23:8765/j/ABCD2345 --shot phone.png [--speaker 王小明]
 import { chromium, devices } from 'playwright-core';
 import { Checklist, parseArgs } from './lib.mjs';
 
@@ -61,6 +61,19 @@ await page.waitForFunction(() => document.getElementById('history').textContent.
 const shown = Date.now() - started;
 list.pass(`Mac 回報「已上大螢幕」（按下發送後 ${shown} ms）`);
 console.log(`E2E_SHOWN_MS=${shown}`);
+
+// 講師超棒投票（App 以 --speaker 啟動時）
+if (args.speaker) {
+  await page.waitForFunction((name) => document.getElementById('voteSpeaker').textContent === name &&
+    getComputedStyle(document.getElementById('voteCard')).display !== 'none', args.speaker, { timeout: 5000 });
+  list.pass(`手機顯示目前的講師「${args.speaker}」與「講師超棒」按鈕`);
+  const voteStarted = Date.now();
+  await page.click('#voteBtn');
+  await page.waitForFunction((name) => document.getElementById('voteBtn').textContent.includes('已投給 ' + name), args.speaker, { timeout: 5000 });
+  list.pass(`按下「講師超棒」→ 顯示已投票（${Date.now() - voteStarted} ms）`);
+  list.check(await page.isDisabled('#voteBtn'), '投過票後按鈕停用，不能重複投');
+  list.check((await page.textContent('#voteCount')).includes('1'), '手機顯示票數', await page.textContent('#voteCount'));
+}
 
 await page.fill('#text', '馬上再送一則');
 await page.evaluate(() => document.getElementById('form').requestSubmit());

@@ -10,6 +10,11 @@ final class OverlayController {
     let stage = DanmakuStageView(frame: .zero)
     private let qrCard = QRCardView(frame: .zero)
     private let largeQR = LargeQRView(frame: .zero)
+    private let voteBadge = VoteBadgeView(frame: .zero)
+    private let announcementView = AnnouncementView(frame: .zero)
+    private var voteSpeaker: String?
+    private var voteCount = 0
+    private var badgeRedrawScheduled = false
     private var cancellables = Set<AnyCancellable>()
 
     private(set) var isVisible = false
@@ -31,9 +36,16 @@ final class OverlayController {
         stage.autoresizingMask = [.width, .height]
         largeQR.frame = rootView.bounds
         largeQR.autoresizingMask = [.width, .height]
+        voteBadge.frame = rootView.bounds
+        voteBadge.autoresizingMask = [.width, .height]
+        announcementView.frame = rootView.bounds
+        announcementView.autoresizingMask = [.width, .height]
+        announcementView.isHidden = true
         rootView.addSubview(stage)
         rootView.addSubview(qrCard) // QR Code 在彈幕上方，隨時掃得到
+        rootView.addSubview(voteBadge)
         rootView.addSubview(largeQR)
+        rootView.addSubview(announcementView)
         panel.contentView = rootView
 
         settings.objectWillChange
@@ -96,6 +108,37 @@ final class OverlayController {
         layoutQR()
     }
 
+    /// 講師超棒票數：speaker 為 nil 代表沒有在投票。
+    func setVote(speaker: String?, votes: Int) {
+        voteSpeaker = speaker
+        voteCount = votes
+        voteBadge.update(speaker: settings.showVoteBadge ? speaker : nil, votes: votes)
+        layoutQR()
+    }
+
+    /// 有人投票：更新票數並播放動畫。很多人同時投票時合併成一次重畫。
+    func voteAdded(votes: Int) {
+        voteCount = votes
+        guard settings.showVoteBadge, voteSpeaker != nil else { return }
+        voteBadge.celebrate()
+        guard !badgeRedrawScheduled else { return }
+        badgeRedrawScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.badgeRedrawScheduled = false
+            self.voteBadge.update(speaker: self.settings.showVoteBadge ? self.voteSpeaker : nil, votes: self.voteCount)
+            self.layoutQR()
+        }
+    }
+
+    func setAnnouncement(_ announcement: Announcement?) {
+        announcementView.announcement = announcement
+    }
+
+    func setJoinedCount(_ count: Int) {
+        largeQR.joinedCount = count
+    }
+
     func setLevel(_ newLevel: Int) {
         guard newLevel != level else { return }
         level = newLevel
@@ -122,6 +165,7 @@ final class OverlayController {
             profileSize: settings.profileSize,
             profilesShown: settings.showNickname || settings.showAvatar
         ))
+        voteBadge.update(speaker: settings.showVoteBadge ? voteSpeaker : nil, votes: voteCount)
         layoutQR()
     }
 
@@ -156,5 +200,7 @@ final class OverlayController {
         qrCard.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
         qrCard.needsDisplay = true
         largeQR.needsDisplay = true
+        voteBadge.place(corner: settings.qrPosition, qrFrame: qrCard.isHidden ? nil : qrCard.frame,
+                        margin: margin, topInset: topInset, unit: max(scale, 0.5))
     }
 }

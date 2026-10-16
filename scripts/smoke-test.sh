@@ -16,6 +16,7 @@ BASE="http://127.0.0.1:8765"
 LOAD_CLIENTS="${LOAD_CLIENTS:-200}"
 LOAD_SECONDS="${LOAD_SECONDS:-60}"
 rm -rf "${OUT}" && mkdir -p "${OUT}"
+STATS="${OUT}/statistics.json"
 
 swift build -c release --product FullscreenProbe >/dev/null
 PROBE="$(swift build -c release --product FullscreenProbe --show-bin-path)/FullscreenProbe"
@@ -31,7 +32,8 @@ launch_app() { # 名稱 App 參數...
   local name="$1"
   shift
   LOG="${OUT}/app-${name}.log"
-  "${APP_BIN}" --no-panel ${1+"$@"} >"${LOG}" 2>&1 &
+  # 統計寫到測試資料夾，不碰使用者自己的統計檔
+  "${APP_BIN}" --no-panel --stats-file "${STATS}" ${1+"$@"} >"${LOG}" 2>&1 &
   APP_PID=$!
   for _ in $(seq 1 60); do
     curl -fsS "${BASE}/healthz" >/dev/null 2>&1 && return 0
@@ -65,14 +67,19 @@ reset_defaults() { defaults delete "${DOMAIN}" >/dev/null 2>&1 || true; }
 # ---------------------------------------------------------------------------
 section "1. 協定測試（真的 App、真的 WebSocket）"
 reset_defaults
-launch_app protocol --start-session || exit 1
+launch_app protocol --start-session --speaker 測試講師 || exit 1
 URL="$(session_url)"
 TOKEN="${URL##*/}"
 [[ -n "${TOKEN}" ]] && pass "場次網址：${URL}" || fail "找不到場次網址"
 ALIAS_FLAG=""
-ifconfig lo0 | grep -q "127.0.0.10 " && ALIAS_FLAG="--aliases"
-node tests/protocol-test.mjs --base "${BASE}" --token "${TOKEN}" ${ALIAS_FLAG} || fail "協定測試"
+# 沒有本機別名時所有模擬手機都是同一個 IP（同一個人）：票數只有 1，「照片」那支手機也算同一人換名
+MIN_VOTES=1; MIN_PEOPLE=1; NICK_CHANGES=3
+if ifconfig lo0 | grep -q "127.0.0.10 "; then ALIAS_FLAG="--aliases"; MIN_VOTES=3; MIN_PEOPLE=3; NICK_CHANGES=2; fi
+node tests/protocol-test.mjs --base "${BASE}" --token "${TOKEN}" --speaker 測試講師 ${ALIAS_FLAG} || fail "協定測試"
 stop_app
+# App 結束（SIGTERM）時寫入統計檔：講師票數、換名次數（Kevin → Kevin 大帥哥 → Kevin）
+node tests/check-stats.mjs --file "${STATS}" --speaker 測試講師 --min-votes "${MIN_VOTES}" --nickname-changes "${NICK_CHANGES}" --min-participants "${MIN_PEOPLE}" \
+  || fail "統計檔（協定測試）"
 
 # ---------------------------------------------------------------------------
 section "2. QR Code 可掃描 + 三種彈幕樣式 + 控制面板"
@@ -157,13 +164,15 @@ stop_app
 
 # ---------------------------------------------------------------------------
 section "4. 驗收流程：手機（Chrome）→ Mac → 全螢幕簡報上出現彈幕"
-launch_app e2e --start-session || exit 1
+# 投票數膠囊也是藍色，這一段先關掉，像素分析才只會看到彈幕
+defaults write "${DOMAIN}" showVoteBadge -bool false
+launch_app e2e --start-session --speaker 王小明 || exit 1
 URL="$(session_url)"
 echo "手機網址（Mac 的區域網路 IP）：${URL}"
 "${PROBE}" show fullscreen --seconds 45 >"${OUT}/probe-e2e.log" 2>&1 &
 PROBE_PID=$!
 sleep 5
-if node tests/e2e-phone.mjs --url "${URL}" --shot "${OUT}/20-phone.png" | tee "${OUT}/e2e.txt"; then
+if node tests/e2e-phone.mjs --url "${URL}" --speaker 王小明 --shot "${OUT}/20-phone.png" | tee "${OUT}/e2e.txt"; then
   # 等這一則彈幕完整進入畫面再截圖（剛進場時只露出右邊一小段）
   sleep 2.5
   shot "21-acceptance-over-fullscreen"
@@ -177,12 +186,14 @@ else
 fi
 kill "${PROBE_PID}" 2>/dev/null
 stop_app
+defaults delete "${DOMAIN}" showVoteBadge >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
-section "5. 壓力測試：${LOAD_CLIENTS} 支手機，每個人都上傳不同的照片大頭貼"
+section "5. 壓力測試：${LOAD_CLIENTS} 支手機，每個人都上傳不同的照片大頭貼，同時按「講師超棒」"
 if ifconfig lo0 | grep -q "127.0.0.$((LOAD_CLIENTS + 1)) "; then
   "${PROBE}" photos "${OUT}/photos" "${LOAD_CLIENTS}" || fail "無法產生測試照片"
-  launch_app load --start-session || exit 1
+  defaults delete "${DOMAIN}" activeSession >/dev/null 2>&1 # 開新場次，統計從 0 開始
+  launch_app load --start-session --speaker 載入測試講師 || exit 1
   URL="$(session_url)"
   sleep 3
   rss_mb() { ps -o rss= -p "${APP_PID}" | awk '{ printf "%.1f", $1 / 1024 }'; }
@@ -192,15 +203,19 @@ if ifconfig lo0 | grep -q "127.0.0.$((LOAD_CLIENTS + 1)) "; then
   ( while kill -0 "${APP_PID}" 2>/dev/null; do ps -o rss=,%cpu= -p "${APP_PID}" >>"${OUT}/resources.txt"; sleep 1; done ) &
   SAMPLER=$!
   node tests/loadtest.mjs --base "${BASE}" --token "${URL##*/}" --clients "${LOAD_CLIENTS}" --duration "${LOAD_SECONDS}" \
-    --photos "${OUT}/photos" --out "${OUT}/loadtest.json" &
+    --photos "${OUT}/photos" --out "${OUT}/loadtest.json" >"${OUT}/loadtest.txt" 2>&1 &
   LOAD_PID=$!
-  sleep 8
-  echo "記憶體（${LOAD_CLIENTS} 人帶照片連線後）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
+  # 全部的人同時按讚後截圖：角落的票數膠囊與飄出來的 👏
+  for _ in $(seq 1 80); do grep -q VOTE_BURST_DONE "${OUT}/loadtest.txt" 2>/dev/null && break; sleep 0.25; done
+  sleep 0.5
+  shot "23-vote-burst"
+  echo "記憶體（${LOAD_CLIENTS} 人帶照片連線、投票後）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   # 一般互動階段中截圖：畫面上的彈幕各自帶著發送者自己的照片
-  sleep 17
+  sleep 20
   shot "22-photo-avatars"
   echo "記憶體（一般互動中）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   wait "${LOAD_PID}" || fail "壓力測試"
+  grep -v VOTE_BURST_DONE "${OUT}/loadtest.txt"
   echo "記憶體（壓力測試結束、手機離線後）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   kill "${SAMPLER}" 2>/dev/null
   wait "${SAMPLER}" 2>/dev/null
@@ -215,15 +230,32 @@ if ifconfig lo0 | grep -q "127.0.0.$((LOAD_CLIENTS + 1)) "; then
     fail "App 沒有接受全部 ${LOAD_CLIENTS} 張照片大頭貼"
   fi
   stop_app
+  node tests/check-stats.mjs --file "${STATS}" --speaker 載入測試講師 --votes "${LOAD_CLIENTS}" --participants "${LOAD_CLIENTS}" \
+    --nickname-changes 41 || fail "統計檔（壓力測試）"
 else
   echo "⚪️ 沒有 lo0 別名，略過壓力測試"
 fi
+
+# ---------------------------------------------------------------------------
+section "6. 投票與統計畫面：本月最佳講師、本場數據、控制面板"
+launch_app best --announce best || true
+sleep 3
+shot "24-best-speaker"
+stop_app
+launch_app summary --announce summary || true
+sleep 3
+shot "25-session-summary"
+stop_app
+launch_app panel-stats --panel --panel-tab stats || true
+sleep 4
+shot "26-panel-stats"
+stop_app
 reset_defaults
 
 # ---------------------------------------------------------------------------
 # CI 無法下載 Artifacts 時檢視截圖用：把縮小後的 JPEG 以 base64 印在 log 中
 if [[ "${PRINT_PREVIEWS:-0}" == "1" ]]; then
-  for name in 01-style-glass 02-style-classic 02-style-card 02-profile-standard 02-profile-extraLarge 03-large-qr 04-control-panel 05-compatibility 20-phone 21-acceptance-over-fullscreen 22-photo-avatars; do
+  for name in 01-style-glass 02-style-classic 02-style-card 02-profile-standard 02-profile-extraLarge 03-large-qr 04-control-panel 05-compatibility 20-phone 21-acceptance-over-fullscreen 22-photo-avatars 23-vote-burst 24-best-speaker 25-session-summary 26-panel-stats; do
     [[ -f "${OUT}/${name}.png" ]] || continue
     sips -s format jpeg -s formatOptions 65 -Z 1100 "${OUT}/${name}.png" --out "${OUT}/preview-${name}.jpg" >/dev/null 2>&1 || continue
     echo "=====BEGIN PREVIEW ${name}====="

@@ -79,13 +79,16 @@ private struct PhotoCache {
 private final class Viewer {
     let id: Int
     let address: String
+    /// 統計用代號（場次 ID + IP 的雜湊）：同一個人重新連線也是同一個代號
+    let person: String
     var clientId: String?
     var nickname: String?
     var avatar: AvatarSource = .none
 
-    init(id: Int, address: String) {
+    init(id: Int, address: String, person: String) {
         self.id = id
         self.address = address
+        self.person = person
     }
 }
 
@@ -120,6 +123,15 @@ final class AppModel: ObservableObject {
     @Published var recordingShortcut = false {
         didSet { recordingShortcut ? hotKeys.unregisterAll() : registerHotkeys() }
     }
+    /// 本場統計（控制面板顯示用，每秒最多更新一次）
+    @Published private(set) var sessionStats: SessionStatistics?
+    /// 過去的場次紀錄
+    @Published private(set) var history: [SessionRecord] = []
+    @Published private(set) var recentSpeakers: [String] = []
+    /// 大螢幕上的公布卡片（本月最佳講師 / 本場數據）
+    @Published private(set) var announcement: Announcement?
+    /// 控制面板目前的分頁
+    @Published var panelTab = "session"
 
     private var gate: ModerationGate
     private var photoCache = PhotoCache(capacity: 24)
@@ -136,18 +148,29 @@ final class AppModel: ObservableObject {
     private var messageCounter = 0
     private static let sessionKey = "activeSession"
 
+    private let statisticsStore: StatisticsStore
+    private var archive = StatisticsArchive()
+    private var statisticsDirty = false
+    private var lastStatisticsSave = Date()
+    private var lastStatisticsPublish = Date.distantPast
+    private var votesDirty = false
+    private var lastVotesBroadcast = Date.distantPast
+
     var liveState: LiveState {
         if session == nil { return .ended }
         if overlayHidden { return .hidden }
         return paused ? .paused : .live
     }
 
-    init(settings: Settings) {
+    init(settings: Settings, statisticsURL: URL? = nil) {
         self.settings = settings
         overlay = OverlayController(settings: settings)
         levelMonitor = WindowLevelMonitor(mode: settings.levelMode)
         gate = ModerationGate(settings: settings.moderation)
+        statisticsStore = StatisticsStore(url: statisticsURL)
     }
+
+    var statisticsFileURL: URL { statisticsStore.url }
 
     // MARK: - 啟動
 
@@ -220,6 +243,17 @@ final class AppModel: ObservableObject {
             NSLog("URBAN LIVE: 恢復進行中的場次")
         }
 
+        // 統計：場次還在就接著統計；場次已經不在（例如過期）就把上次的統計存成紀錄
+        archive = statisticsStore.load()
+        if session != nil {
+            if archive.active == nil { archive.active = SessionStatistics() }
+        } else if let active = archive.active {
+            archive.finishActive(at: active.updatedAt)
+        }
+        saveStatistics(force: true)
+        publishStatistics(force: true)
+        refreshVoteBadge()
+
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer, forMode: .common)
         clockTimer = timer
@@ -251,6 +285,21 @@ final class AppModel: ObservableObject {
             senders = senderMap.values.sorted { $0.lastAt > $1.lastAt }
         }
         logPhotoUsage()
+
+        archive.active?.recordOnline(uniqueOnline, at: now)
+        overlay.setJoinedCount(archive.active?.participantCount ?? 0)
+        if votesDirty, now.timeIntervalSince(lastVotesBroadcast) >= 1, let turn = archive.active?.currentTurn {
+            votesDirty = false
+            lastVotesBroadcast = now
+            server.broadcast(ServerMessage(t: "votes", turn: turn.id, votes: turn.votes).json(), to: Array(viewers.keys))
+        }
+        publishStatistics()
+        saveStatistics()
+    }
+
+    /// 目前在線人數（同一支手機開兩個分頁只算一次）。
+    private var uniqueOnline: Int {
+        Set(viewers.values.map(\.address)).count
     }
 
     /// 照片大頭貼的人數與佔用（壓縮檔總和）有變化時寫進系統紀錄，方便現場排查與壓力測試量測。
@@ -280,6 +329,11 @@ final class AppModel: ObservableObject {
         let newSession = LiveSession.start(duration: settings.sessionHours * 3600)
         session = newSession
         persistSession()
+        archive.finishActive(at: Date())
+        archive.active = SessionStatistics()
+        saveStatistics(force: true)
+        publishStatistics(force: true)
+        refreshVoteBadge()
         gate.resetForNewSession()
         blocked = []
         senderMap = [:]
@@ -303,6 +357,13 @@ final class AppModel: ObservableObject {
         overlay.stage.clearScreen()
         session = nil
         persistSession()
+        if let active = archive.active {
+            NSLog("URBAN LIVE: 本場統計：參與 \(active.participantCount) 人、最高同時在線 \(active.peakOnline) 人、講師票數 \(active.totalVotes)、換名 \(active.nicknameChanges) 次")
+        }
+        archive.finishActive(at: Date())
+        saveStatistics(force: true)
+        publishStatistics(force: true)
+        refreshVoteBadge()
         largeQR = false
         paused = false
         refreshURL()
@@ -371,6 +432,7 @@ final class AppModel: ObservableObject {
 
     func clearScreen() {
         overlay.stage.clearScreen()
+        hideAnnouncement()
     }
 
     func clearQueue() {
@@ -421,6 +483,145 @@ final class AppModel: ObservableObject {
             return (action, shortcut, { [weak self] in self?.perform(action) })
         }
         hotkeyFailures = hotKeys.register(bindings)
+    }
+
+    // MARK: - 講師超棒投票
+
+    var currentTurn: SpeakerTurn? { sessionStats?.currentTurn }
+
+    /// 開始為一位講師投票；已經在投票時就換成這一位（上一位自動結束）。
+    func startVoting(for rawName: String) {
+        guard session != nil, let name = SpeakerName.clean(rawName) else { return }
+        if archive.active == nil { archive.active = SessionStatistics() }
+        archive.active?.startTurn(speaker: name, online: uniqueOnline)
+        NSLog("URBAN LIVE: 講師投票開始：\(name)")
+        turnChanged()
+    }
+
+    func stopVoting() {
+        guard archive.active?.currentTurn != nil else { return }
+        archive.active?.endTurn()
+        NSLog("URBAN LIVE: 講師投票結束")
+        turnChanged()
+    }
+
+    private func turnChanged() {
+        votesDirty = false
+        for viewer in viewers.values {
+            server.send(speakerMessage(for: viewer).json(), to: viewer.id)
+        }
+        refreshVoteBadge()
+        saveStatistics(force: true)
+        publishStatistics(force: true)
+    }
+
+    private func speakerMessage(for viewer: Viewer) -> ServerMessage {
+        let turn = archive.active?.currentTurn
+        return ServerMessage(
+            t: "speaker", speaker: turn?.speaker, turn: turn?.id, votes: turn?.votes,
+            voted: turn.map { _ in archive.active?.hasVoted(viewer.person) ?? false }
+        )
+    }
+
+    private func vote(_ viewer: Viewer, _ message: ClientMessage) {
+        let outcome = archive.active?.vote(viewer.person, turnID: Self.cleanIdentifier(message.turn)) ?? .noSpeaker
+        let turn = archive.active?.currentTurn
+        server.send(outcome.reply(speaker: turn?.speaker, turn: turn?.id).json(), to: viewer.id)
+        if outcome == .staleTurn {
+            server.send(speakerMessage(for: viewer).json(), to: viewer.id)
+        }
+        if case let .accepted(votes) = outcome {
+            didVote(votes)
+        }
+    }
+
+    private func didVote(_ votes: Int) {
+        votesDirty = true
+        statisticsDirty = true
+        overlay.voteAdded(votes: votes)
+    }
+
+    private func refreshVoteBadge() {
+        let turn = archive.active?.currentTurn
+        overlay.setVote(speaker: turn?.speaker, votes: turn?.votes ?? 0)
+    }
+
+    // MARK: - 數據統計
+
+    private func personKey(_ address: String) -> String {
+        PersonKey.make(statisticsID: archive.active?.id ?? "none", address: address)
+    }
+
+    /// 控制面板與排行榜用的資料，每秒最多更新一次。
+    private func publishStatistics(force: Bool = false) {
+        let now = Date()
+        guard force || now.timeIntervalSince(lastStatisticsPublish) >= 1 else { return }
+        lastStatisticsPublish = now
+        if sessionStats != archive.active {
+            sessionStats = archive.active
+            statisticsDirty = true
+        }
+        if history != archive.sessions { history = archive.sessions }
+        let speakers = archive.recentSpeakers()
+        if recentSpeakers != speakers { recentSpeakers = speakers }
+    }
+
+    /// 寫入統計檔：有變動時最多每 15 秒一次；場次開始 / 結束、換講師時立即寫入。
+    private func saveStatistics(force: Bool = false) {
+        guard force || (statisticsDirty && Date().timeIntervalSince(lastStatisticsSave) >= 15) else { return }
+        statisticsStore.save(archive)
+        statisticsDirty = false
+        lastStatisticsSave = Date()
+    }
+
+    /// 本月（或指定月份）的講師排行。
+    func ranking(for month: MonthKey) -> [SpeakerRank] {
+        SpeakerRanking.rank(archive.allTurns, month: month, order: settings.rankingOrder)
+    }
+
+    /// 有講師紀錄的月份，一定包含本月。
+    var rankingMonths: [MonthKey] {
+        let months = Set(SpeakerRanking.months(archive.allTurns) + [MonthKey(Date())])
+        return months.sorted(by: >)
+    }
+
+    func showBestSpeaker(month: MonthKey = MonthKey(Date())) {
+        setAnnouncement(.bestSpeaker(month: month, order: settings.rankingOrder, ranks: ranking(for: month)))
+    }
+
+    func showSessionSummary() {
+        if let active = archive.active {
+            setAnnouncement(.sessionSummary(SessionSummary(active)))
+        } else if let last = archive.sessions.last {
+            setAnnouncement(.sessionSummary(SessionSummary(record: last)))
+        }
+    }
+
+    func hideAnnouncement() {
+        setAnnouncement(nil)
+    }
+
+    private func setAnnouncement(_ value: Announcement?) {
+        announcement = value
+        overlay.setAnnouncement(value)
+        if value != nil && overlayHidden { setOverlayHidden(false) }
+    }
+
+    func exportStatistics(to url: URL) throws {
+        try statisticsStore.exportCSV(archive, to: url)
+    }
+
+    /// 清除過去的場次紀錄（進行中的場次不受影響）。
+    func clearHistory() {
+        archive.sessions = []
+        saveStatistics(force: true)
+        publishStatistics(force: true)
+    }
+
+    /// App 結束前寫入統計檔。
+    func shutdown() {
+        saveStatistics(force: true)
+        server.stop()
     }
 
     // MARK: - 測試彈幕
@@ -519,7 +720,8 @@ final class AppModel: ObservableObject {
                 server.close(info.id, finalMessage: ServerMessage(t: "bye", code: "blocked", message: "你已被主持人暫停發言").json(), code: 4003)
                 return
             }
-            viewers[info.id] = Viewer(id: info.id, address: info.address)
+            if archive.active == nil { archive.active = SessionStatistics() }
+            viewers[info.id] = Viewer(id: info.id, address: info.address, person: personKey(info.address))
 
         case let .text(id, text):
             guard let viewer = viewers[id], let message = ClientMessage.decode(text) else { return }
@@ -527,6 +729,7 @@ final class AppModel: ObservableObject {
             case "hello": hello(viewer, message)
             case "profile": applyProfile(viewer, message.profile, reply: true)
             case "send": receive(viewer, message)
+            case "vote": vote(viewer, message)
             case "ping": server.send(ServerMessage(t: "pong").json(), to: id)
             default: break
             }
@@ -544,8 +747,10 @@ final class AppModel: ObservableObject {
             viewers.removeValue(forKey: viewer.id)
             return
         }
+        archive.active?.join(viewer.person)
         applyProfile(viewer, message.profile, reply: false)
         let state = liveState
+        let turn = archive.active?.currentTurn
         server.send(ServerMessage(
             t: "welcome",
             state: state.rawValue,
@@ -554,7 +759,11 @@ final class AppModel: ObservableObject {
             cooldown: settings.cooldown,
             allowPhoto: settings.allowPhotoAvatar,
             nickname: viewer.nickname,
-            profileSize: settings.profileSize.rawValue
+            profileSize: settings.profileSize.rawValue,
+            speaker: turn?.speaker,
+            turn: turn?.id,
+            votes: turn?.votes,
+            voted: turn.map { _ in archive.active?.hasVoted(viewer.person) ?? false }
         ).json(), to: viewer.id)
     }
 
@@ -562,6 +771,9 @@ final class AppModel: ObservableObject {
         switch gate.evaluateNickname(profile?.nickname) {
         case let .success(nickname):
             viewer.nickname = nickname
+            if archive.active?.setNickname(nickname, for: viewer.person) == true {
+                NSLog("URBAN LIVE: 有人換名了（本場第 \(archive.active?.nicknameChanges ?? 0) 次）")
+            }
             if reply {
                 server.send(ServerMessage(t: "profile", ok: true, nickname: nickname).json(), to: viewer.id)
             }
@@ -590,6 +802,7 @@ final class AppModel: ObservableObject {
         messageCounter += 1
         let messageID = Self.cleanIdentifier(message.id) ?? "m\(messageCounter)"
         counters.received += 1
+        archive.active?.messagesReceived += 1
         let result = gate.evaluate(
             text: message.text ?? "",
             address: viewer.address,
@@ -621,10 +834,12 @@ final class AppModel: ObservableObject {
                 didDrop(item, reason: "目前彈幕太多，這則沒有顯示")
             } else {
                 counters.accepted += 1
+                archive.active?.recordSender(viewer.person)
                 record(viewer, text: text)
             }
         case let .failure(rejection):
             counters.rejected += 1
+            archive.active?.messagesBlocked += 1
             server.send(ServerMessage(
                 t: "ack", id: messageID, ok: false, code: rejection.code,
                 message: rejection.message, retryAfter: rejection.retryAfter
@@ -667,6 +882,8 @@ final class AppModel: ObservableObject {
 
     private func didShow(_ item: DanmakuItem, waited: TimeInterval) {
         counters.shown += 1
+        // 主持人的測試彈幕、相容性測試不算進統計
+        if !item.id.hasPrefix("local-") { archive.active?.messagesShown += 1 }
         counters.lastWait = waited
         if let id = item.connectionID {
             server.send(ServerMessage(t: "shown", id: item.id).json(), to: id)
@@ -702,18 +919,26 @@ final class AppModel: ObservableObject {
         case ("GET", _) where request.path.hasPrefix("/j/"):
             return .html(MobilePage.html)
         case ("GET", "/api/status"):
-            let state = session?.accepts(token: request.queryValue("s")) == true ? liveState : .ended
+            let valid = session?.accepts(token: request.queryValue("s")) == true
+            let state = valid ? liveState : .ended
+            let person = personKey(address)
+            if valid { archive.active?.join(person) }
+            let turn = valid ? archive.active?.currentTurn : nil
             return .json(200, ServerMessage(
                 t: "status", state: state.rawValue, message: state.phoneMessage,
-                maxLength: settings.maxLength, cooldown: settings.cooldown
+                maxLength: settings.maxLength, cooldown: settings.cooldown,
+                speaker: turn?.speaker, turn: turn?.id, votes: turn?.votes,
+                voted: turn.map { _ in archive.active?.hasVoted(person) ?? false }
             ))
         case ("POST", "/api/send"):
             return httpSend(request, address: address)
+        case ("POST", "/api/vote"):
+            return httpVote(request, address: address)
         case ("GET", "/healthz"):
             return .text(200, "ok")
         case ("GET", "/favicon.ico"), ("GET", "/apple-touch-icon.png"), ("GET", "/apple-touch-icon-precomposed.png"):
             return HTTPResponse(status: 204)
-        case (_, "/api/send"), (_, "/api/status"):
+        case (_, "/api/send"), (_, "/api/status"), (_, "/api/vote"):
             return .text(405, "Method Not Allowed")
         default:
             return .text(404, "Not Found")
@@ -729,6 +954,9 @@ final class AppModel: ObservableObject {
             return .json(403, APIResult(ok: false, code: "invalid_session", message: "這個連結已失效，請重新掃描大螢幕上的 QR Code"))
         }
         counters.received += 1
+        archive.active?.messagesReceived += 1
+        let person = personKey(address)
+        archive.active?.join(person)
         let clientId = Self.cleanIdentifier(payload.clientId)
         let result = gate.evaluate(
             text: payload.text, address: address, clientId: clientId,
@@ -751,9 +979,11 @@ final class AppModel: ObservableObject {
                 return .json(503, APIResult(ok: false, code: "queue_full", message: "目前彈幕太多，請稍後再送", retryAfter: 10))
             }
             counters.accepted += 1
+            archive.active?.recordSender(person)
             return .json(200, APIResult(ok: true, code: "queued", message: "已送出"))
         case let .failure(rejection):
             counters.rejected += 1
+            archive.active?.messagesBlocked += 1
             let status: Int
             switch rejection.code {
             case "blocked": status = 403
@@ -765,5 +995,27 @@ final class AppModel: ObservableObject {
             }
             return .json(status, APIResult(ok: false, code: rejection.code, message: rejection.message, retryAfter: rejection.retryAfter))
         }
+    }
+
+    /// WebSocket 無法使用時的投票備援。
+    private func httpVote(_ request: HTTPRequest, address: String) -> HTTPResponse {
+        guard let payload = try? JSONDecoder().decode(HTTPVotePayload.self, from: request.body) else {
+            return .json(400, APIResult(ok: false, code: "bad_request", message: "格式錯誤，請重新整理頁面"))
+        }
+        guard let session, session.accepts(token: payload.session) else {
+            return .json(403, APIResult(ok: false, code: "invalid_session", message: "這個連結已失效，請重新掃描大螢幕上的 QR Code"))
+        }
+        guard !gate.isBlocked(address: address, clientId: Self.cleanIdentifier(payload.clientId)) else {
+            return .json(403, APIResult(ok: false, code: "blocked", message: "你已被主持人暫停發言"))
+        }
+        let person = personKey(address)
+        archive.active?.join(person)
+        let outcome = archive.active?.vote(person, turnID: Self.cleanIdentifier(payload.turn)) ?? .noSpeaker
+        if case let .accepted(votes) = outcome { didVote(votes) }
+        let speaker = archive.active?.currentTurn?.speaker
+        return .json(outcome.isAccepted ? 200 : 409, APIResult(
+            ok: outcome.isAccepted, code: outcome.code, message: outcome.message(speaker: speaker),
+            votes: outcome.votes, voted: outcome.votes != nil
+        ))
     }
 }

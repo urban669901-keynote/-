@@ -119,6 +119,24 @@ h1 { margin: 0 0 4px; font-size: 26px; font-weight: 900; color: var(--deep); let
 .row .btn { flex: 1; text-align: center; }
 .small { font-size: 12px; color: var(--muted); margin-top: 6px; }
 footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 18px; line-height: 1.7; }
+
+/* 講師超棒投票 */
+.vote { background: linear-gradient(160deg, #FFFFFF 0%, #FFF8E6 100%); border-color: #F3E2B0; }
+.vote-head { display: flex; align-items: center; gap: 12px; }
+.vote-mic { flex: none; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 24px; background: var(--gold); }
+.vote-who { flex: 1; min-width: 0; }
+.vote-label { font-size: 12.5px; font-weight: 800; color: var(--muted); letter-spacing: .04em; }
+.vote-name { font-size: 20px; font-weight: 900; color: var(--deep); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vote-count { flex: none; font-size: 13px; font-weight: 800; color: var(--royal); background: #EEF4FF; border-radius: 999px; padding: 6px 10px; }
+.vote-btn { width: 100%; margin-top: 12px; border: 0; border-radius: 16px; padding: 15px 0; font-size: 19px; font-weight: 900; color: var(--deep);
+  background: linear-gradient(180deg, #FFD978, var(--gold)); box-shadow: 0 6px 16px rgba(243, 201, 105, .45); }
+.vote-btn:active { transform: scale(.97); }
+.vote-btn:disabled { background: #E2E8F0; color: var(--muted); box-shadow: none; }
+.vote-btn.done { background: #DCFCE7; color: var(--ok); box-shadow: none; }
+.vote-btn.pop { animation: pop .45s ease-out; }
+@keyframes pop { 0% { transform: scale(1) } 40% { transform: scale(1.06) } 100% { transform: scale(1) } }
+.fly { position: fixed; z-index: 20; font-size: 34px; pointer-events: none; animation: fly 1.2s ease-out forwards; }
+@keyframes fly { 0% { opacity: 0; transform: translate(0, 0) scale(.6) } 15% { opacity: 1 } 100% { opacity: 0; transform: translate(var(--dx), -160px) scale(1.3) } }
 </style>
 </head>
 <body>
@@ -140,6 +158,15 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
         </div>
         <div class="edit">編輯 ›</div>
       </button>
+    </div>
+
+    <div class="card vote" id="voteCard" style="display:none">
+      <div class="vote-head">
+        <div class="vote-mic">🎤</div>
+        <div class="vote-who"><div class="vote-label">現在的講師</div><div class="vote-name" id="voteSpeaker"></div></div>
+        <div class="vote-count" id="voteCount"></div>
+      </div>
+      <button class="vote-btn" id="voteBtn" type="button">👏 講師超棒！</button>
     </div>
 
     <div class="card">
@@ -219,7 +246,8 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
   var profile = load('profile', { nickname: '', avatar: { kind: 'none' } });
 
   var state = { ws: null, connected: false, attempts: 0, fallback: false, stopped: false, live: false,
-                maxLength: 25, cooldown: 5, cooldownUntil: 0, allowPhoto: true, profileSize: 'large', pending: {}, counter: 0 };
+                maxLength: 25, cooldown: 5, cooldownUntil: 0, allowPhoto: true, profileSize: 'large', pending: {}, counter: 0,
+                speaker: null, turn: null, votes: 0, voted: false, voting: false, voteTimer: null };
   var input = $('text'), sendButton = $('send');
 
   // ---------- 畫面 ----------
@@ -313,6 +341,71 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     });
   }
 
+  // ---------- 講師超棒投票 ----------
+  function setSpeaker(data) {
+    var turn = data.speaker ? data.turn : null;
+    var changed = turn !== state.turn;
+    state.speaker = data.speaker || null;
+    state.turn = turn;
+    state.votes = data.votes || 0;
+    state.voted = !!data.voted;
+    if (changed) { state.voting = false; clearTimeout(state.voteTimer); }
+    renderVote();
+    return changed;
+  }
+  function renderVote() {
+    var card = $('voteCard'), button = $('voteBtn');
+    if (!state.speaker) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    $('voteSpeaker').textContent = state.speaker;
+    $('voteCount').textContent = '👏 ' + state.votes;
+    button.className = 'vote-btn' + (state.voted ? ' done' : '');
+    button.disabled = state.voted || state.voting || (!state.connected && !state.fallback);
+    button.textContent = state.voted ? '✓ 已投給 ' + state.speaker : (state.voting ? '投票中…' : '👏 講師超棒！');
+  }
+  function celebrate() {
+    var button = $('voteBtn'), box = button.getBoundingClientRect();
+    button.classList.remove('pop'); void button.offsetWidth; button.classList.add('pop');
+    for (var i = 0; i < 6; i++) {
+      var el = document.createElement('div');
+      el.className = 'fly'; el.textContent = ['👏', '🎉', '👏', '✨', '👏', '💙'][i];
+      el.style.left = (box.left + box.width * (0.2 + 0.12 * i)) + 'px';
+      el.style.top = (box.top - 10) + 'px';
+      el.style.setProperty('--dx', (Math.random() * 60 - 30) + 'px');
+      el.style.animationDelay = (i * 0.06) + 's';
+      document.body.appendChild(el);
+      setTimeout(function (node) { return function () { node.remove(); }; }(el), 1600);
+    }
+  }
+  function voteResult(data) {
+    state.voting = false;
+    clearTimeout(state.voteTimer);
+    if (typeof data.votes === 'number') { state.votes = Math.max(state.votes, data.votes); }
+    if (data.voted) { state.voted = true; }
+    if (data.ok) { celebrate(); toast(data.message || '謝謝！'); }
+    else { toast(data.message || '投票失敗，請再試一次', true); }
+    renderVote();
+  }
+  function vote() {
+    if (!state.turn || state.voted || state.voting) { return; }
+    state.voting = true;
+    renderVote();
+    if (state.connected && state.ws && state.ws.readyState === 1) {
+      state.voteTimer = setTimeout(function () {
+        if (state.voting) { state.voting = false; renderVote(); toast('沒有收到電腦回應，請再按一次', true); }
+      }, 6000);
+      state.ws.send(JSON.stringify({ t: 'vote', turn: state.turn }));
+      return;
+    }
+    fetch('/api/vote', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+      body: JSON.stringify({ session: token, clientId: clientId, turn: state.turn })
+    }).then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(voteResult)
+      .catch(function () { state.voting = false; renderVote(); toast('連不到電腦，請確認和現場在同一個 Wi-Fi', true); });
+  }
+  $('voteBtn').addEventListener('click', vote);
+
   // ---------- 連線 ----------
   function applyState(kind, message) {
     state.live = kind === 'live';
@@ -340,6 +433,8 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     };
     ws.onclose = function () {
       state.connected = false;
+      if (state.voting) { state.voting = false; clearTimeout(state.voteTimer); }
+      renderVote();
       failPending('連線中斷，這則可能沒有送達，請再送一次');
       if (!opened) { state.attempts++; }
       if (!state.stopped) { scheduleReconnect(); }
@@ -368,6 +463,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
         if (!state.connected) {
           state.maxLength = data.maxLength || state.maxLength; state.cooldown = data.cooldown || state.cooldown;
           applyState(data.state, data.message);
+          setSpeaker(data);
           if (data.state === 'ended') { setStatus('ended', '場次已結束或連結失效'); }
         }
       })
@@ -384,10 +480,20 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
         state.profileSize = data.profileSize || 'large';
         hideNotice();
         applyState(data.state, data.message);
+        setSpeaker(data);
         updateCounter();
         break;
       case 'state':
         applyState(data.state, data.message);
+        break;
+      case 'speaker':
+        if (setSpeaker(data) && data.speaker) { toast('🎤 現在的講師：' + data.speaker + '，覺得講得好就按 👏'); }
+        break;
+      case 'vote':
+        voteResult(data);
+        break;
+      case 'votes':
+        if (data.turn === state.turn) { state.votes = Math.max(state.votes, data.votes || 0); renderVote(); }
         break;
       case 'ack':
         var pending = state.pending[data.id];
@@ -417,6 +523,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
       case 'bye':
         state.stopped = true;
         state.connected = false;
+        state.speaker = null; renderVote();
         if (data.code === 'blocked') { showNotice('⛔️', '你已被主持人暫停發言', data.message || '', false); setStatus('blocked', '已暫停發言'); }
         else if (data.code === 'ended') { showNotice('👋', '場次已結束', data.message || '謝謝參與！', true); setStatus('ended', '場次已結束'); }
         else { showNotice('📷', '請重新掃描 QR Code', data.message || '這個連結已失效', true); setStatus('invalid', '連結已失效'); }
