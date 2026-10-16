@@ -7,6 +7,8 @@
 同仁手機 ──同一個 Wi-Fi──▶ Mac（URBAN LIVE）──AirPlay 鏡像──▶ Apple TV ──▶ 投影機 / 電視
 ```
 
+> 📘 **第一次使用請看 [使用教學](docs/GUIDE.md)**：安裝、每天早會流程、同仁手機操作（可直接轉傳）、快捷鍵、問題排除。
+
 | 玻璃膠囊（預設） | 經典高對比 | URBAN LIVE 訊息卡 |
 | --- | --- | --- |
 | ![A](docs/images/style-a-glass.jpg) | ![B](docs/images/style-b-classic.jpg) | ![C](docs/images/style-c-card.jpg) |
@@ -62,6 +64,8 @@
 不需要「輔助使用」或「螢幕錄製」權限。
 
 ## 每天早會的使用流程
+
+（完整圖文步驟見 [使用教學](docs/GUIDE.md#二每天早會約-2-分鐘)）
 
 1. Mac 與同仁手機連**同一個 Wi-Fi**。
 2. 控制中心 →「螢幕鏡像」→ 選 Apple TV →「**鏡像**內建顯示器」（不要選延伸顯示器）。
@@ -146,6 +150,7 @@ swift test                         # 核心邏輯單元測試
 open "dist/URBAN LIVE.app" --args --start-session --demo   # 展示模式
 ```
 
+- 使用教學：[docs/GUIDE.md](docs/GUIDE.md)
 - 架構與技術選型（Swift/AppKit vs Tauri）：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 網路方案：[docs/NETWORK.md](docs/NETWORK.md)
 - 測試與實機驗證：[docs/TESTING.md](docs/TESTING.md)
