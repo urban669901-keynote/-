@@ -110,6 +110,13 @@ final class Settings: ObservableObject {
     /// 本月最佳講師的排名方式
     @Published var rankingOrder: RankingOrder { didSet { save(rankingOrder.rawValue, "rankingOrder") } }
 
+    // 送禮特效（免費）
+    @Published var giftsEnabled: Bool { didSet { save(giftsEnabled, "giftsEnabled") } }
+    /// 每人每場可以送幾次（0 = 不開放這種禮物）
+    @Published var popperQuota: Int { didSet { save(popperQuota, "popperQuota") } }
+    @Published var fireworksQuota: Int { didSet { save(fireworksQuota, "fireworksQuota") } }
+    @Published var rocketQuota: Int { didSet { save(rocketQuota, "rocketQuota") } }
+
     // 進階
     @Published var levelMode: WindowLevelMode { didSet { save(levelMode.rawValue, "windowLevelMode") } }
     @Published var preferredInterface: String? { didSet { save(preferredInterface, "preferredInterface") } }
@@ -148,6 +155,10 @@ final class Settings: ObservableObject {
         sessionHours = Self.clamp(store.object(forKey: "sessionHours") as? Double ?? Defaults.sessionHours, 0.5, 12)
         showVoteBadge = store.object(forKey: "showVoteBadge") as? Bool ?? true
         rankingOrder = store.string(forKey: "rankingOrder").flatMap(RankingOrder.init(rawValue:)) ?? .votes
+        giftsEnabled = store.object(forKey: "giftsEnabled") as? Bool ?? true
+        popperQuota = Self.quota(store, "popperQuota", GiftKind.popper.defaultQuota)
+        fireworksQuota = Self.quota(store, "fireworksQuota", GiftKind.fireworks.defaultQuota)
+        rocketQuota = Self.quota(store, "rocketQuota", GiftKind.rocket.defaultQuota)
         levelMode = store.string(forKey: "windowLevelMode").flatMap(WindowLevelMode.init(rawValue:)) ?? .auto
         preferredInterface = store.string(forKey: "preferredInterface")
         externalBaseURL = store.string(forKey: "externalBaseURL") ?? ""
@@ -191,6 +202,16 @@ final class Settings: ObservableObject {
         profileSize = Defaults.profileSize
         qrSize = Defaults.qrSize
         qrPosition = .bottomRight
+    }
+
+    /// 實際生效的送禮次數（沒開放送禮時全部為 0）。
+    var giftQuotas: [GiftKind: Int] {
+        guard giftsEnabled else { return [:] }
+        return [.popper: popperQuota, .fireworks: fireworksQuota, .rocket: rocketQuota]
+    }
+
+    private static func quota(_ store: UserDefaults, _ key: String, _ fallback: Int) -> Int {
+        min(max(store.object(forKey: key) as? Int ?? fallback, 0), GiftKind.maxQuota)
     }
 
     func resetShortcuts() {

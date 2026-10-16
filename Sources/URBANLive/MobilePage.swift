@@ -137,6 +137,18 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
 @keyframes pop { 0% { transform: scale(1) } 40% { transform: scale(1.06) } 100% { transform: scale(1) } }
 .fly { position: fixed; z-index: 20; font-size: 34px; pointer-events: none; animation: fly 1.2s ease-out forwards; }
 @keyframes fly { 0% { opacity: 0; transform: translate(0, 0) scale(.6) } 15% { opacity: 1 } 100% { opacity: 0; transform: translate(var(--dx), -160px) scale(1.3) } }
+
+/* 送禮特效（免費） */
+.gift-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.gift-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 4px 10px; border-radius: 16px;
+  border: 1.5px solid var(--line); background: linear-gradient(180deg, #FFFFFF, #F1F6FF); color: var(--deep); }
+.gift-btn .gift-emoji { font-size: 34px; line-height: 1.1; }
+.gift-btn .gift-name { font-size: 15px; font-weight: 900; }
+.gift-btn .gift-left { font-size: 12px; font-weight: 800; color: var(--electric); }
+.gift-btn.rocket { border-color: #F3E2B0; background: linear-gradient(180deg, #FFF8E6, #FFE7A3); }
+.gift-btn:active { transform: scale(.95); }
+.gift-btn:disabled { opacity: .45; }
+.gift-btn.pop { animation: pop .45s ease-out; }
 </style>
 </head>
 <body>
@@ -167,6 +179,12 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
         <div class="vote-count" id="voteCount"></div>
       </div>
       <button class="vote-btn" id="voteBtn" type="button">👏 講師超棒！</button>
+    </div>
+
+    <div class="card" id="giftCard" style="display:none">
+      <p class="section-title" id="giftTitle">🎁 送禮特效（免費）</p>
+      <div class="gift-row" id="giftRow"></div>
+      <p class="small">免費，每場有次數限制；送出後大螢幕會播放特效。</p>
     </div>
 
     <div class="card">
@@ -247,7 +265,8 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
 
   var state = { ws: null, connected: false, attempts: 0, fallback: false, stopped: false, live: false,
                 maxLength: 25, cooldown: 5, cooldownUntil: 0, allowPhoto: true, profileSize: 'large', pending: {}, counter: 0,
-                speaker: null, turn: null, votes: 0, voted: false, voting: false, voteTimer: null };
+                speaker: null, turn: null, votes: 0, voted: false, voting: false, voteTimer: null,
+                gifts: null, giftPending: null, giftTimer: null };
   var input = $('text'), sendButton = $('send');
 
   // ---------- 畫面 ----------
@@ -351,6 +370,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     state.voted = !!data.voted;
     if (changed) { state.voting = false; clearTimeout(state.voteTimer); }
     renderVote();
+    renderGifts();
     return changed;
   }
   function renderVote() {
@@ -406,6 +426,83 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
   }
   $('voteBtn').addEventListener('click', vote);
 
+  // ---------- 送禮特效（免費） ----------
+  var GIFTS = [{ kind: 'popper', emoji: '🎉', name: '拉炮' }, { kind: 'fireworks', emoji: '🎆', name: '煙火' }, { kind: 'rocket', emoji: '🚀', name: '火箭' }];
+  function setGifts(gifts) {
+    state.gifts = gifts && Object.keys(gifts).length ? gifts : null;
+    renderGifts();
+  }
+  function renderGifts() {
+    var card = $('giftCard'), row = $('giftRow');
+    if (!state.gifts) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    $('giftTitle').textContent = state.speaker ? '🎁 送給講師 ' + state.speaker : '🎁 送禮特效（免費）';
+    row.innerHTML = '';
+    GIFTS.forEach(function (gift) {
+      if (!(gift.kind in state.gifts)) { return; }
+      var left = state.gifts[gift.kind];
+      var button = document.createElement('button');
+      button.type = 'button'; button.id = 'gift-' + gift.kind; button.className = 'gift-btn ' + gift.kind;
+      button.innerHTML = '<span class="gift-emoji"></span><span class="gift-name"></span><span class="gift-left"></span>';
+      button.querySelector('.gift-emoji').textContent = gift.emoji;
+      button.querySelector('.gift-name').textContent = gift.name;
+      button.querySelector('.gift-left').textContent = state.giftPending === gift.kind ? '送出中…' : (left > 0 ? '剩 ' + left + ' 次' : '已用完');
+      button.disabled = left <= 0 || !!state.giftPending || !state.live || (!state.connected && !state.fallback);
+      button.addEventListener('click', function () { sendGift(gift); });
+      row.appendChild(button);
+    });
+  }
+  function flyFrom(element, emojis) {
+    var box = element.getBoundingClientRect();
+    emojis.forEach(function (emoji, i) {
+      var el = document.createElement('div');
+      el.className = 'fly'; el.textContent = emoji;
+      el.style.left = (box.left + box.width * (0.15 + 0.14 * i)) + 'px';
+      el.style.top = (box.top - 10) + 'px';
+      el.style.setProperty('--dx', (Math.random() * 60 - 30) + 'px');
+      el.style.animationDelay = (i * 0.06) + 's';
+      document.body.appendChild(el);
+      setTimeout(function () { el.remove(); }, 1600);
+    });
+  }
+  function giftResult(data, gift) {
+    clearTimeout(state.giftTimer);
+    state.giftPending = null;
+    var kind = data.kind || (gift && gift.kind);
+    if (state.gifts && kind in state.gifts) {
+      if (typeof data.remaining === 'number') { state.gifts[kind] = data.remaining; }
+      else if (data.code === 'quota_used') { state.gifts[kind] = 0; }
+    }
+    renderGifts();
+    var button = $('gift-' + kind);
+    if (data.ok) {
+      if (button) { button.classList.add('pop'); flyFrom(button, [button.querySelector('.gift-emoji').textContent, '✨', '🎉']); }
+      toast(data.message || '已送出，看大螢幕！');
+    } else {
+      toast(data.message || '送出失敗，請再試一次', true);
+    }
+  }
+  function sendGift(gift) {
+    if (state.giftPending || !state.gifts || !(state.gifts[gift.kind] > 0)) { return; }
+    state.giftPending = gift.kind;
+    renderGifts();
+    state.counter++;
+    var id = 'g' + Date.now().toString(36) + state.counter;
+    if (state.connected && state.ws && state.ws.readyState === 1) {
+      state.giftTimer = setTimeout(function () {
+        if (state.giftPending) { state.giftPending = null; renderGifts(); toast('沒有收到電腦回應，請再試一次', true); }
+      }, 6000);
+      state.ws.send(JSON.stringify({ t: 'gift', id: id, kind: gift.kind }));
+      return;
+    }
+    fetch('/api/gift', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+      body: JSON.stringify({ session: token, clientId: clientId, kind: gift.kind })
+    }).then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (data) { giftResult(data, gift); })
+      .catch(function () { state.giftPending = null; renderGifts(); toast('連不到電腦，請確認和現場在同一個 Wi-Fi', true); });
+  }
+
   // ---------- 連線 ----------
   function applyState(kind, message) {
     state.live = kind === 'live';
@@ -413,6 +510,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     setStatus(kind, label);
     $('lead').textContent = message || '';
     updateSendButton();
+    renderGifts();
   }
 
   function connect() {
@@ -434,7 +532,9 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
     ws.onclose = function () {
       state.connected = false;
       if (state.voting) { state.voting = false; clearTimeout(state.voteTimer); }
+      if (state.giftPending) { state.giftPending = null; clearTimeout(state.giftTimer); }
       renderVote();
+      renderGifts();
       failPending('連線中斷，這則可能沒有送達，請再送一次');
       if (!opened) { state.attempts++; }
       if (!state.stopped) { scheduleReconnect(); }
@@ -464,6 +564,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
           state.maxLength = data.maxLength || state.maxLength; state.cooldown = data.cooldown || state.cooldown;
           applyState(data.state, data.message);
           setSpeaker(data);
+          setGifts(data.gifts);
           if (data.state === 'ended') { setStatus('ended', '場次已結束或連結失效'); }
         }
       })
@@ -481,6 +582,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
         hideNotice();
         applyState(data.state, data.message);
         setSpeaker(data);
+        setGifts(data.gifts);
         updateCounter();
         break;
       case 'state':
@@ -491,6 +593,12 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
         break;
       case 'vote':
         voteResult(data);
+        break;
+      case 'gift':
+        giftResult(data, null);
+        break;
+      case 'gifts':
+        setGifts(data.gifts);
         break;
       case 'votes':
         if (data.turn === state.turn) { state.votes = Math.max(state.votes, data.votes || 0); renderVote(); }
@@ -524,6 +632,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 1
         state.stopped = true;
         state.connected = false;
         state.speaker = null; renderVote();
+        state.gifts = null; renderGifts();
         if (data.code === 'blocked') { showNotice('⛔️', '你已被主持人暫停發言', data.message || '', false); setStatus('blocked', '已暫停發言'); }
         else if (data.code === 'ended') { showNotice('👋', '場次已結束', data.message || '謝謝參與！', true); setStatus('ended', '場次已結束'); }
         else { showNotice('📷', '請重新掃描 QR Code', data.message || '這個連結已失效', true); setStatus('invalid', '連結已失效'); }

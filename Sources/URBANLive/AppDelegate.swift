@@ -1,4 +1,5 @@
 import AppKit
+import DanmakuCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var model: AppModel!
@@ -54,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let speaker = Self.value(after: "--speaker", in: arguments) {
             model.startVoting(for: speaker)
+        }
+        if let kind = Self.value(after: "--gift-demo", in: arguments).flatMap(GiftKind.init(rawValue:)) {
+            model.startGiftDemo(kind)
         }
         switch Self.value(after: "--announce", in: arguments) {
         case "best": model.showBestSpeaker()

@@ -78,7 +78,7 @@ if ifconfig lo0 | grep -q "127.0.0.10 "; then ALIAS_FLAG="--aliases"; MIN_VOTES=
 node tests/protocol-test.mjs --base "${BASE}" --token "${TOKEN}" --speaker 測試講師 ${ALIAS_FLAG} || fail "協定測試"
 stop_app
 # App 結束（SIGTERM）時寫入統計檔：講師票數、換名次數（Kevin → Kevin 大帥哥 → Kevin）
-node tests/check-stats.mjs --file "${STATS}" --speaker 測試講師 --min-votes "${MIN_VOTES}" --nickname-changes "${NICK_CHANGES}" --min-participants "${MIN_PEOPLE}" \
+node tests/check-stats.mjs --file "${STATS}" --speaker 測試講師 --min-votes "${MIN_VOTES}" --nickname-changes "${NICK_CHANGES}" --min-participants "${MIN_PEOPLE}" --rockets 1 \
   || fail "統計檔（協定測試）"
 
 # ---------------------------------------------------------------------------
@@ -209,13 +209,17 @@ if ifconfig lo0 | grep -q "127.0.0.$((LOAD_CLIENTS + 1)) "; then
   for _ in $(seq 1 80); do grep -q VOTE_BURST_DONE "${OUT}/loadtest.txt" 2>/dev/null && break; sleep 0.25; done
   sleep 0.5
   shot "23-vote-burst"
+  # 全部的人同時送 🎉 後截圖：彩帶與「誰送的」字幕
+  for _ in $(seq 1 80); do grep -q GIFT_BURST_DONE "${OUT}/loadtest.txt" 2>/dev/null && break; sleep 0.25; done
+  sleep 0.6
+  shot "27-gift-burst"
   echo "記憶體（${LOAD_CLIENTS} 人帶照片連線、投票後）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   # 一般互動階段中截圖：畫面上的彈幕各自帶著發送者自己的照片
   sleep 20
   shot "22-photo-avatars"
   echo "記憶體（一般互動中）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   wait "${LOAD_PID}" || fail "壓力測試"
-  grep -v VOTE_BURST_DONE "${OUT}/loadtest.txt"
+  grep -v "VOTE_BURST_DONE\|GIFT_BURST_DONE" "${OUT}/loadtest.txt"
   echo "記憶體（壓力測試結束、手機離線後）：RSS $(rss_mb) MB；$(footprint_of)" | tee -a "${OUT}/memory.txt"
   kill "${SAMPLER}" 2>/dev/null
   wait "${SAMPLER}" 2>/dev/null
@@ -231,7 +235,7 @@ if ifconfig lo0 | grep -q "127.0.0.$((LOAD_CLIENTS + 1)) "; then
   fi
   stop_app
   node tests/check-stats.mjs --file "${STATS}" --speaker 載入測試講師 --votes "${LOAD_CLIENTS}" --participants "${LOAD_CLIENTS}" \
-    --nickname-changes 41 || fail "統計檔（壓力測試）"
+    --nickname-changes 41 --min-poppers 25 || fail "統計檔（壓力測試）"
 else
   echo "⚪️ 沒有 lo0 別名，略過壓力測試"
 fi
@@ -250,12 +254,28 @@ launch_app panel-stats --panel --panel-tab stats || true
 sleep 4
 shot "26-panel-stats"
 stop_app
+
+# 送禮特效：手機（Chrome）送出 🚀 → 大螢幕火箭升空；煙火用主持人「試放」
+launch_app gift --start-session --speaker 王小明 || true
+URL="$(session_url)"
+if node tests/e2e-phone.mjs --url "${URL}" --speaker 王小明 --gift rocket --shot "${OUT}/30-phone-gift.png" >"${OUT}/e2e-gift.txt" 2>&1; then
+  shot "28-gift-rocket"
+  pass "手機送出 🚀 火箭，大螢幕播放特效"
+else
+  fail "手機送禮"
+fi
+grep "✅\|❌" "${OUT}/e2e-gift.txt"
+stop_app
+launch_app fireworks --gift-demo fireworks || true
+sleep 0.8
+shot "29-gift-fireworks"
+stop_app
 reset_defaults
 
 # ---------------------------------------------------------------------------
 # CI 無法下載 Artifacts 時檢視截圖用：把縮小後的 JPEG 以 base64 印在 log 中
 if [[ "${PRINT_PREVIEWS:-0}" == "1" ]]; then
-  for name in 01-style-glass 02-style-classic 02-style-card 02-profile-standard 02-profile-extraLarge 03-large-qr 04-control-panel 05-compatibility 20-phone 21-acceptance-over-fullscreen 22-photo-avatars 23-vote-burst 24-best-speaker 25-session-summary 26-panel-stats; do
+  for name in 01-style-glass 02-style-classic 02-style-card 02-profile-standard 02-profile-extraLarge 03-large-qr 04-control-panel 05-compatibility 20-phone 21-acceptance-over-fullscreen 22-photo-avatars 23-vote-burst 24-best-speaker 25-session-summary 26-panel-stats 27-gift-burst 28-gift-rocket 29-gift-fireworks 30-phone-gift; do
     [[ -f "${OUT}/${name}.png" ]] || continue
     sips -s format jpeg -s formatOptions 65 -Z 1100 "${OUT}/${name}.png" --out "${OUT}/preview-${name}.jpg" >/dev/null 2>&1 || continue
     echo "=====BEGIN PREVIEW ${name}====="

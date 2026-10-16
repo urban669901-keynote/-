@@ -349,14 +349,16 @@ final class AnnouncementView: NSView {
     }
 
     private static func details(_ rank: SpeakerRank) -> String {
-        var parts = ["👏 \(rank.votes) 票", "分享 \(rank.turns) 次"]
+        var parts = ["👏 \(rank.votes) 票"]
+        if let gifts = GiftSummary.text(rank.gifts, separator: " ") { parts.append(gifts) }
+        parts.append("分享 \(rank.turns) 次")
         if let rate = rank.voteRate { parts.append("得票率 \(Int((rate * 100).rounded()))%") }
         return parts.joined(separator: " · ")
     }
 
     private func drawSummary(_ summary: SessionSummary, u: CGFloat) {
         let width = min(bounds.width * 0.86, 1280 * u)
-        let height = 720 * u
+        let height = (GiftSummary.text(summary.gifts) == nil ? 720 : 770) * u
         let card = NSRect(x: (bounds.width - width) / 2, y: (bounds.height - height) / 2, width: width, height: height)
         var y = drawCard(card, u: u) + 18 * u
         y = line(centered("📊 本場數據", size: 56 * u, weight: .heavy, color: Brand.deepSea), in: card, y: y)
@@ -393,6 +395,9 @@ final class AnnouncementView: NSView {
         if !summary.speakers.isEmpty {
             let speakers = summary.speakers.prefix(4).map { "\($0.name) \($0.votes) 票" }.joined(separator: "　")
             y = line(centered("🎤 " + speakers, size: 28 * u, weight: .bold, color: Brand.deepSea), in: card, y: y) + 10 * u
+        }
+        if let gifts = GiftSummary.text(summary.gifts) {
+            y = line(centered("🎁 禮物：" + gifts, size: 28 * u, weight: .bold, color: Brand.deepSea), in: card, y: y) + 10 * u
         }
         if let renamer = summary.topRenamer {
             _ = line(centered("👑 換名王：\(renamer)（換了 \(summary.topRenamerChanges) 次）XD", size: 28 * u, weight: .bold, color: NSColor(hex: 0xB7791F)),

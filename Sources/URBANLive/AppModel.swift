@@ -155,6 +155,8 @@ final class AppModel: ObservableObject {
     private var lastStatisticsPublish = Date.distantPast
     private var votesDirty = false
     private var lastVotesBroadcast = Date.distantPast
+    private var lastGiftQuotas: [GiftKind: Int] = [:]
+    private var giftDemoTimer: Timer?
 
     var liveState: LiveState {
         if session == nil { return .ended }
@@ -254,6 +256,8 @@ final class AppModel: ObservableObject {
         publishStatistics(force: true)
         refreshVoteBadge()
 
+        lastGiftQuotas = settings.giftQuotas
+
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer, forMode: .common)
         clockTimer = timer
@@ -266,6 +270,13 @@ final class AppModel: ObservableObject {
     private func settingsChanged() {
         if gate.settings != settings.moderation {
             gate.update(settings.moderation)
+        }
+        // 主持人開關送禮或調整次數：通知每支手機（每個人剩下的次數不同）
+        if settings.giftQuotas != lastGiftQuotas {
+            lastGiftQuotas = settings.giftQuotas
+            for viewer in viewers.values {
+                server.send(ServerMessage(t: "gifts", gifts: giftsRemaining(for: viewer.person)).json(), to: viewer.id)
+            }
         }
         refreshURL()
     }
@@ -355,6 +366,7 @@ final class AppModel: ObservableObject {
         viewers.removeAll()
         photoCache.removeAll()
         overlay.stage.clearScreen()
+        overlay.clearGifts()
         session = nil
         persistSession()
         if let active = archive.active {
@@ -432,6 +444,7 @@ final class AppModel: ObservableObject {
 
     func clearScreen() {
         overlay.stage.clearScreen()
+        overlay.clearGifts()
         hideAnnouncement()
     }
 
@@ -544,6 +557,65 @@ final class AppModel: ObservableObject {
     private func refreshVoteBadge() {
         let turn = archive.active?.currentTurn
         overlay.setVote(speaker: turn?.speaker, votes: turn?.votes ?? 0)
+    }
+
+    // MARK: - 送禮特效（免費）
+
+    /// 每種有開放的禮物還剩幾次；沒有開放送禮時為 nil（手機隱藏送禮區）。
+    private func giftsRemaining(for person: String) -> [String: Int]? {
+        let quotas = settings.giftQuotas
+        guard quotas.values.contains(where: { $0 > 0 }) else { return nil }
+        let remaining = archive.active?.giftsRemaining(for: person, quotas: quotas)
+            ?? SessionStatistics().giftsRemaining(for: person, quotas: quotas)
+        return remaining.isEmpty ? nil : remaining
+    }
+
+    private func gift(_ viewer: Viewer, _ message: ClientMessage) {
+        let id = Self.cleanIdentifier(message.id)
+        guard let kind = message.kind.flatMap(GiftKind.init(rawValue:)) else {
+            server.send(ServerMessage(t: "gift", id: id, ok: false, code: "bad_gift", message: "不支援的禮物").json(), to: viewer.id)
+            return
+        }
+        let outcome = sendGift(kind, person: viewer.person, nickname: viewer.nickname)
+        server.send(outcome.reply(id: id, kind: kind, speaker: archive.active?.currentTurn?.speaker).json(), to: viewer.id)
+    }
+
+    /// 檢查（場次狀態、次數、冷卻、大螢幕排隊）→ 記錄 → 播放特效。被擋下的不消耗次數。
+    private func sendGift(_ kind: GiftKind, person: String, nickname: String?) -> GiftOutcome {
+        guard liveState == .live else { return .notLive(liveState.phoneMessage) }
+        let quota = settings.giftQuotas[kind] ?? 0
+        let check = archive.active?.giftCheck(kind, person: person, quota: quota) ?? .disabled
+        guard check.isSent else { return check }
+        guard overlay.canAcceptGift else { return .busy }
+        archive.active?.recordGift(kind, person: person)
+        statisticsDirty = true
+        let sender = settings.showNickname ? (nickname ?? "匿名觀眾") : "有人"
+        overlay.playGift(kind, banner: Self.giftBanner(kind, sender: sender, speaker: archive.active?.currentTurn?.speaker))
+        return check
+    }
+
+    static func giftBanner(_ kind: GiftKind, sender: String, speaker: String?) -> String {
+        switch kind {
+        case .rocket: return "🚀 \(sender) 送出火箭" + (speaker.map { "給 \($0)！" } ?? "！")
+        case .fireworks: return "🎆 \(sender) 放了煙火" + (speaker.map { "給 \($0)" } ?? "")
+        case .popper: return "🎉 \(sender) 拉炮" + (speaker.map { "給 \($0)" } ?? "！")
+        }
+    }
+
+    /// 主持人試放特效（不計入統計）。
+    func testGift(_ kind: GiftKind) {
+        if overlayHidden { setOverlayHidden(false) }
+        guard overlay.canAcceptGift else { return }
+        overlay.playGift(kind, banner: "\(kind.emoji) 主持人試放\(kind.title)")
+    }
+
+    /// `--gift-demo`：每 4 秒試放一次（截圖、自動測試用）。
+    func startGiftDemo(_ kind: GiftKind) {
+        giftDemoTimer?.invalidate()
+        let timer = Timer(timeInterval: 4, repeats: true) { [weak self] _ in self?.testGift(kind) }
+        RunLoop.main.add(timer, forMode: .common)
+        giftDemoTimer = timer
+        testGift(kind)
     }
 
     // MARK: - 數據統計
@@ -730,6 +802,7 @@ final class AppModel: ObservableObject {
             case "profile": applyProfile(viewer, message.profile, reply: true)
             case "send": receive(viewer, message)
             case "vote": vote(viewer, message)
+            case "gift": gift(viewer, message)
             case "ping": server.send(ServerMessage(t: "pong").json(), to: id)
             default: break
             }
@@ -763,7 +836,8 @@ final class AppModel: ObservableObject {
             speaker: turn?.speaker,
             turn: turn?.id,
             votes: turn?.votes,
-            voted: turn.map { _ in archive.active?.hasVoted(viewer.person) ?? false }
+            voted: turn.map { _ in archive.active?.hasVoted(viewer.person) ?? false },
+            gifts: giftsRemaining(for: viewer.person)
         ).json(), to: viewer.id)
     }
 
@@ -928,17 +1002,20 @@ final class AppModel: ObservableObject {
                 t: "status", state: state.rawValue, message: state.phoneMessage,
                 maxLength: settings.maxLength, cooldown: settings.cooldown,
                 speaker: turn?.speaker, turn: turn?.id, votes: turn?.votes,
-                voted: turn.map { _ in archive.active?.hasVoted(person) ?? false }
+                voted: turn.map { _ in archive.active?.hasVoted(person) ?? false },
+                gifts: valid ? giftsRemaining(for: person) : nil
             ))
         case ("POST", "/api/send"):
             return httpSend(request, address: address)
         case ("POST", "/api/vote"):
             return httpVote(request, address: address)
+        case ("POST", "/api/gift"):
+            return httpGift(request, address: address)
         case ("GET", "/healthz"):
             return .text(200, "ok")
         case ("GET", "/favicon.ico"), ("GET", "/apple-touch-icon.png"), ("GET", "/apple-touch-icon-precomposed.png"):
             return HTTPResponse(status: 204)
-        case (_, "/api/send"), (_, "/api/status"), (_, "/api/vote"):
+        case (_, "/api/send"), (_, "/api/status"), (_, "/api/vote"), (_, "/api/gift"):
             return .text(405, "Method Not Allowed")
         default:
             return .text(404, "Not Found")
@@ -1016,6 +1093,36 @@ final class AppModel: ObservableObject {
         return .json(outcome.isAccepted ? 200 : 409, APIResult(
             ok: outcome.isAccepted, code: outcome.code, message: outcome.message(speaker: speaker),
             votes: outcome.votes, voted: outcome.votes != nil
+        ))
+    }
+
+    /// WebSocket 無法使用時的送禮備援。
+    private func httpGift(_ request: HTTPRequest, address: String) -> HTTPResponse {
+        guard let payload = try? JSONDecoder().decode(HTTPGiftPayload.self, from: request.body),
+              let kind = GiftKind(rawValue: payload.kind) else {
+            return .json(400, APIResult(ok: false, code: "bad_request", message: "格式錯誤，請重新整理頁面"))
+        }
+        guard let session, session.accepts(token: payload.session) else {
+            return .json(403, APIResult(ok: false, code: "invalid_session", message: "這個連結已失效，請重新掃描大螢幕上的 QR Code"))
+        }
+        guard !gate.isBlocked(address: address, clientId: Self.cleanIdentifier(payload.clientId)) else {
+            return .json(403, APIResult(ok: false, code: "blocked", message: "你已被主持人暫停發言"))
+        }
+        let person = personKey(address)
+        archive.active?.join(person)
+        let outcome = sendGift(kind, person: person, nickname: nil)
+        let status: Int
+        switch outcome {
+        case .sent: status = 200
+        case .tooFast: status = 429
+        case .busy: status = 503
+        case .notLive: status = 423
+        case .quotaUsed, .disabled: status = 409
+        }
+        return .json(status, APIResult(
+            ok: outcome.isSent, code: outcome.code,
+            message: outcome.message(kind: kind, speaker: archive.active?.currentTurn?.speaker),
+            retryAfter: outcome.retryAfter, remaining: outcome.remaining
         ))
     }
 }

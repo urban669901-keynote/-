@@ -66,6 +66,7 @@ struct SessionSummary: Equatable {
     var topRenamer: String?
     var topRenamerChanges: Int
     var speakers: [(name: String, votes: Int)]
+    var gifts: [String: Int]?
 
     init(_ stats: SessionStatistics) {
         date = stats.startedAt
@@ -78,6 +79,7 @@ struct SessionSummary: Equatable {
         topRenamer = stats.topRenamer?.display
         topRenamerChanges = stats.topRenamer?.changes ?? 0
         speakers = stats.turns.map { (name: $0.speaker, votes: $0.votes) }
+        gifts = stats.giftTotals
     }
 
     /// 已結束的場次（紀錄裡沒有暱稱，所以沒有「換名王」）。
@@ -92,13 +94,14 @@ struct SessionSummary: Equatable {
         topRenamer = nil
         topRenamerChanges = 0
         speakers = record.turns.map { (name: $0.speaker, votes: $0.votes) }
+        gifts = record.gifts
     }
 
     static func == (lhs: SessionSummary, rhs: SessionSummary) -> Bool {
         lhs.date == rhs.date && lhs.participants == rhs.participants && lhs.peakOnline == rhs.peakOnline
             && lhs.senders == rhs.senders && lhs.shown == rhs.shown && lhs.votes == rhs.votes
             && lhs.nicknameChanges == rhs.nicknameChanges && lhs.topRenamer == rhs.topRenamer
-            && lhs.topRenamerChanges == rhs.topRenamerChanges
+            && lhs.topRenamerChanges == rhs.topRenamerChanges && lhs.gifts == rhs.gifts
             && lhs.speakers.map(\.name) == rhs.speakers.map(\.name) && lhs.speakers.map(\.votes) == rhs.speakers.map(\.votes)
     }
 }

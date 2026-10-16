@@ -110,6 +110,17 @@ export class Phone {
     return reply;
   }
 
+  /** 送禮特效（popper / fireworks / rocket），回傳 Mac 的回覆（null 代表逾時）。 */
+  async gift(kind, timeoutMs = 5000) {
+    this.counter += 1;
+    const id = `g${this.counter}_${Math.random().toString(36).slice(2, 7)}`;
+    const sentAt = performance.now();
+    this.ws.send(JSON.stringify({ t: 'gift', id, kind }));
+    const reply = await this.waitFor((m) => m.t === 'gift' && m.id === id, timeoutMs).catch(() => null);
+    if (reply) reply.latency = reply.receivedAt - sentAt;
+    return reply;
+  }
+
   /** 更新暱稱 / 大頭貼（與手機網頁「儲存」相同）。 */
   updateProfile(nickname) {
     this.nickname = nickname;

@@ -1,6 +1,6 @@
 // 端對端測試：用真的瀏覽器（Google Chrome，模擬 iPhone）打開 QR Code 網址，
 // 設定暱稱與大頭貼、輸入「URBAN 今天衝三件 🔥」並發送，等待 Mac 回報「已上大螢幕」。
-//   node e2e-phone.mjs --url http://192.168.1.23:8765/j/ABCD2345 --shot phone.png [--speaker 王小明]
+//   node e2e-phone.mjs --url http://192.168.1.23:8765/j/ABCD2345 --shot phone.png [--speaker 王小明] [--gift rocket]
 import { chromium, devices } from 'playwright-core';
 import { Checklist, parseArgs } from './lib.mjs';
 
@@ -73,6 +73,17 @@ if (args.speaker) {
   list.pass(`按下「講師超棒」→ 顯示已投票（${Date.now() - voteStarted} ms）`);
   list.check(await page.isDisabled('#voteBtn'), '投過票後按鈕停用，不能重複投');
   list.check((await page.textContent('#voteCount')).includes('1'), '手機顯示票數', await page.textContent('#voteCount'));
+}
+
+// 送禮特效（--gift rocket）
+if (args.gift) {
+  await page.waitForSelector(`#gift-${args.gift}:not([disabled])`, { timeout: 5000 });
+  list.pass(`手機顯示送禮按鈕（${await page.textContent(`#gift-${args.gift}`)}）`);
+  const giftStarted = Date.now();
+  await page.click(`#gift-${args.gift}`);
+  await page.waitForFunction((kind) => document.getElementById('gift-' + kind).textContent.includes('已用完'), args.gift, { timeout: 5000 });
+  list.pass(`送出後按鈕顯示「已用完」（${Date.now() - giftStarted} ms）`);
+  list.check((await page.textContent('#toast')).includes('看大螢幕'), '手機提示「看大螢幕」', await page.textContent('#toast'));
 }
 
 await page.fill('#text', '馬上再送一則');

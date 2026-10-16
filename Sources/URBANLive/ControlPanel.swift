@@ -164,6 +164,10 @@ private struct SessionTab: View {
                     VoteControls(model: model, settings: settings)
                 }
 
+                GroupBox(label: Label("送禮特效（免費）", systemImage: "gift")) {
+                    GiftControls(model: model, settings: settings)
+                }
+
                 GroupBox(label: Label("即時狀態", systemImage: "chart.bar")) {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 10) {
                         StatTile(title: "連線中的手機", value: model.stats.connected)
@@ -266,6 +270,45 @@ private struct VoteControls: View {
     }
 }
 
+// MARK: - 送禮特效
+
+private struct GiftControls: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var settings: Settings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("開放同仁送禮（🎉 拉炮、🎆 煙火、🚀 火箭，完全免費）", isOn: $settings.giftsEnabled)
+            ForEach(GiftKind.allCases, id: \.self) { kind in
+                HStack(spacing: 12) {
+                    Text("\(kind.emoji) \(kind.title)").frame(width: 80, alignment: .leading)
+                    Stepper(quota(kind).wrappedValue == 0 ? "不開放" : "每人每場 \(quota(kind).wrappedValue) 次",
+                            value: quota(kind), in: 0...GiftKind.maxQuota)
+                        .frame(width: 200, alignment: .leading)
+                        .disabled(!settings.giftsEnabled)
+                    Button("試放") { model.testGift(kind) }
+                    Spacer()
+                    if let stats = model.sessionStats {
+                        Text("本場 \(stats.giftCount(kind))").foregroundColor(.secondary).monospacedDigit()
+                    }
+                }
+            }
+            Text("同一個人每 3 秒最多送 1 次；大螢幕特效排隊超過 30 個時，手機會收到「請稍後再送」。講師投票進行中時，禮物算是送給目前的講師。「試放」只在大螢幕播放、不計入統計。")
+                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func quota(_ kind: GiftKind) -> Binding<Int> {
+        switch kind {
+        case .popper: return $settings.popperQuota
+        case .fireworks: return $settings.fireworksQuota
+        case .rocket: return $settings.rocketQuota
+        }
+    }
+}
+
 // MARK: - 投票與統計
 
 private struct StatisticsTab: View {
@@ -336,11 +379,15 @@ private struct StatisticsTab: View {
                 if let renamer = stats.topRenamer {
                     Text("👑 換名王：\(renamer.display)（換了 \(renamer.changes) 次）")
                 }
+                if let gifts = GiftSummary.text(stats.giftTotals) {
+                    Text("🎁 本場禮物：\(gifts)")
+                }
                 ForEach(stats.turns) { turn in
                     HStack {
                         Text("🎤 \(turn.speaker)").bold()
                         if turn.endedAt == nil { Text("投票中").font(.caption).foregroundColor(.green) }
                         Spacer()
+                        if let gifts = GiftSummary.text(turn.gifts, separator: " ") { Text(gifts) }
                         Text("\(turn.votes) 票").monospacedDigit()
                         Text("在場 \(turn.audience) 人").foregroundColor(.secondary).frame(width: 90, alignment: .trailing)
                     }
@@ -383,6 +430,7 @@ private struct StatisticsTab: View {
                         Text(Self.medal(index)).frame(width: 34)
                         Text(rank.name).bold()
                         Spacer()
+                        if let gifts = GiftSummary.text(rank.gifts, separator: " ") { Text(gifts) }
                         Text("\(rank.votes) 票").monospacedDigit().frame(width: 70, alignment: .trailing)
                         Text("分享 \(rank.turns) 次").frame(width: 80, alignment: .trailing)
                         Text(rank.voteRate.map { "得票率 \(Int(($0 * 100).rounded()))%" } ?? "—")

@@ -155,5 +155,25 @@ if (args.speaker) {
   }
 }
 
+// ---------- 送禮特效（免費） ----------
+list.check(welcome.gifts && welcome.gifts.popper === 5 && welcome.gifts.fireworks === 2 && welcome.gifts.rocket === 1,
+  'welcome 帶有每種禮物的剩餘次數（拉炮 5、煙火 2、火箭 1）', JSON.stringify(welcome.gifts));
+const rocket = await kevin.gift('rocket');
+list.check(rocket && rocket.ok === true && rocket.code === 'sent' && rocket.remaining === 0,
+  `送出火箭、大螢幕播放特效（${rocket ? rocket.latency.toFixed(1) : '-'} ms）`, JSON.stringify(rocket));
+const tooFastGift = await kevin.gift('popper');
+list.check(tooFastGift && tooFastGift.code === 'too_fast' && tooFastGift.retryAfter > 0, '同一人連續送禮至少間隔 3 秒', JSON.stringify(tooFastGift));
+await sleep(3100);
+const secondRocket = await kevin.gift('rocket');
+list.check(secondRocket && secondRocket.code === 'quota_used', '火箭每人每場 1 次，用完會告知', JSON.stringify(secondRocket));
+const badGift = await kevin.gift('money');
+list.check(badGift && badGift.code === 'bad_gift', '不支援的禮物被拒絕', JSON.stringify(badGift));
+if (args.aliases) {
+  const httpGift = await request('POST', '/api/gift', { session: args.token, clientId: 'c_gift', kind: 'popper' }, nextAddress());
+  list.check(httpGift.status === 200 && JSON.parse(httpGift.body).remaining === 4, 'HTTP 備援通道也能送禮', httpGift.body);
+  const wrongGift = await request('POST', '/api/gift', { session: 'WRONG234', kind: 'popper' }, nextAddress());
+  list.check(wrongGift.status === 403, '送禮也會驗證場次', `HTTP ${wrongGift.status}`);
+}
+
 [kevin, other, photo, flood, garbage, stranger].forEach((phone) => phone.close());
 list.finish();

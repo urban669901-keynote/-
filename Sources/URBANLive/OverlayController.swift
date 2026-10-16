@@ -11,6 +11,7 @@ final class OverlayController {
     private let qrCard = QRCardView(frame: .zero)
     private let largeQR = LargeQRView(frame: .zero)
     private let voteBadge = VoteBadgeView(frame: .zero)
+    private let giftEffects = GiftEffectsView(frame: .zero)
     private let announcementView = AnnouncementView(frame: .zero)
     private var voteSpeaker: String?
     private var voteCount = 0
@@ -38,12 +39,15 @@ final class OverlayController {
         largeQR.autoresizingMask = [.width, .height]
         voteBadge.frame = rootView.bounds
         voteBadge.autoresizingMask = [.width, .height]
+        giftEffects.frame = rootView.bounds
+        giftEffects.autoresizingMask = [.width, .height]
         announcementView.frame = rootView.bounds
         announcementView.autoresizingMask = [.width, .height]
         announcementView.isHidden = true
         rootView.addSubview(stage)
         rootView.addSubview(qrCard) // QR Code 在彈幕上方，隨時掃得到
         rootView.addSubview(voteBadge)
+        rootView.addSubview(giftEffects) // 送禮特效在彈幕與 QR Code 上方
         rootView.addSubview(largeQR)
         rootView.addSubview(announcementView)
         panel.contentView = rootView
@@ -129,6 +133,17 @@ final class OverlayController {
             self.voteBadge.update(speaker: self.settings.showVoteBadge ? self.voteSpeaker : nil, votes: self.voteCount)
             self.layoutQR()
         }
+    }
+
+    /// 大螢幕還能不能再排送禮特效。
+    var canAcceptGift: Bool { giftEffects.canAccept }
+
+    func playGift(_ kind: GiftKind, banner: String) {
+        giftEffects.enqueue(kind, banner: banner)
+    }
+
+    func clearGifts() {
+        giftEffects.clear()
     }
 
     func setAnnouncement(_ announcement: Announcement?) {

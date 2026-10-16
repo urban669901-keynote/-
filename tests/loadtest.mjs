@@ -97,6 +97,21 @@ if (turn) {
     if (i === 0) phone.updateProfile('換名王本人');
   });
   summary.renames = 41;
+
+  // 送禮特效：全部的人同一瞬間送 🎉 拉炮（大螢幕特效排隊上限 30，其餘請稍後再送）
+  if (live[0].welcome.gifts) {
+    console.log(`▶ ${live.length} 人同一瞬間送 🎉 拉炮…`);
+    const giftStart = performance.now();
+    const gifts = await Promise.all(live.map((phone) => phone.gift('popper')));
+    const giftDone = performance.now() - giftStart;
+    console.log('GIFT_BURST_DONE');
+    summary.gift = {
+      outcomes: gifts.reduce((acc, r) => { const key = r ? r.code : 'no_reply'; acc[key] = (acc[key] || 0) + 1; return acc; }, {}),
+      allRepliesInMs: Math.round(giftDone),
+      latencyMs: stats(gifts.filter(Boolean).map((r) => r.latency)),
+    };
+    console.log(`  結果：${JSON.stringify(summary.gift.outcomes)}，全部回覆 ${summary.gift.allRepliesInMs} ms；回覆延遲 p95 ${summary.gift.latencyMs.p95} ms`);
+  }
 }
 
 // ---------- 2. 一般互動：200 人在線，全場平均每 3 秒有人送一則 ----------
@@ -179,6 +194,12 @@ if (args.out) fs.writeFileSync(args.out, JSON.stringify(summary, null, 2));
 // ---------- 判定 ----------
 const problems = [];
 if (summary.connect.failed > 0) problems.push(`${summary.connect.failed} 支手機連線失敗`);
+if (summary.gift) {
+  const sent = summary.gift.outcomes.sent || 0;
+  if (summary.gift.outcomes.no_reply) problems.push(`${summary.gift.outcomes.no_reply} 個送禮沒有回覆`);
+  if (sent < 25 || sent > 34) problems.push(`同時送禮成功 ${sent} 個，預期約 30 個（特效排隊上限）`);
+  if (sent + (summary.gift.outcomes.busy || 0) !== live.length) problems.push('送禮結果不是「成功」就該是「稍後再送」');
+}
 if (summary.vote) {
   if ((summary.vote.outcomes.voted || 0) !== live.length) problems.push(`講師投票只有 ${summary.vote.outcomes.voted || 0} / ${live.length} 票成功`);
   if (summary.vote.maxReportedVotes !== live.length) problems.push(`回覆的最高票數 ${summary.vote.maxReportedVotes} ≠ ${live.length}`);
