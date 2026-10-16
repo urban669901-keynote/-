@@ -19,6 +19,12 @@
 | --- | --- | --- |
 | ![標準](docs/images/profile-standard.jpg) | ![大](docs/images/style-a-glass.jpg) | ![特大](docs/images/profile-extra-large.jpg) |
 
+講師超棒投票與數據統計：
+
+| 講師超棒（大螢幕即時票數，飄出 👏） | 本場數據（含換名王 XD） | 本月最佳講師 |
+| --- | --- | --- |
+| ![講師超棒](docs/images/vote-badge.jpg) | ![本場數據](docs/images/session-summary.jpg) | ![本月最佳講師](docs/images/best-speaker.jpg) |
+
 | 手機發送頁 | 控制面板 | 大型 QR Code（開場掃描用） |
 | --- | --- | --- |
 | <img src="docs/images/phone.jpg" width="230" alt="手機"> | ![控制面板](docs/images/control-panel.jpg) | ![大型 QR](docs/images/large-qr.jpg) |
@@ -133,7 +139,7 @@ App 記憶體從 15 MB 增加到約 40 MB（活動監視器的數字），CPU �
 
 詳見 [docs/TESTING.md](docs/TESTING.md)（已驗證 / 尚未驗證分開列出）。
 
-- ✅ 自動化驗證（macOS 15 實機 CI）：單元測試（71 項）、協定測試、QR Code 截圖解碼、彈幕覆蓋四種全螢幕方式、Chrome 手機端對端（上傳人像照片、發送到上螢幕約 0.2～0.6 秒、按「講師超棒」）、200 支手機壓力測試且每支各自上傳不同照片大頭貼並同時投票（全數連線、200 票 15 ms 內全部回覆、回條 p95 < 70 ms、App 記憶體最高 80 MB／活動監視器約 40 MB、CPU 平均約 3%）、統計檔內容（人數、票數、換名次數、沒有 IP）。
+- ✅ 自動化驗證（macOS 15 實機 CI）：單元測試（71 項）、協定測試、QR Code 截圖解碼、彈幕覆蓋四種全螢幕方式、Chrome 手機端對端（上傳人像照片、發送到上螢幕約 0.2～0.6 秒、按「講師超棒」）、200 支手機壓力測試且每支各自上傳不同照片大頭貼並同時投票（全數連線、200 票 15 ms 內全部回覆、回條 p95 < 70 ms、App 記憶體最高 80 MB／活動監視器約 40 MB、CPU 平均約 1～3%）、統計檔內容（人數、票數、換名次數、沒有 IP）。
 - ⚠️ 需要你實機確認：Keynote / PowerPoint 全螢幕播放、AirPlay → Apple TV → 投影機、投影上的 QR Code 掃描、真實 Wi-Fi 與手機、快捷鍵、長時間穩定性。
 
 ## 已知限制
