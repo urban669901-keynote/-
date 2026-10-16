@@ -6,6 +6,7 @@ import Foundation
 //   {"t":"hello","clientId":"c_xxx","profile":{...}}   連線後第一則
 //   {"t":"profile","profile":{...}}                      更新暱稱 / 大頭貼
 //   {"t":"send","id":"m_1","text":"URBAN 今天衝三件 🔥"}
+//   {"t":"vote","turn":"abc123"}                         講師超棒投票（turn = 手機看到的講師時段）
 //   {"t":"ping"}
 //
 // Mac → 手機
@@ -15,6 +16,9 @@ import Foundation
 //   {"t":"shown","id":"m_1"}                              已出現在大螢幕
 //   {"t":"dropped","id":"m_1","message":"..."}            排隊太久、或被清空，沒有顯示
 //   {"t":"profile","ok":false,"message":"..."}
+//   {"t":"speaker","speaker":"王小明","turn":"abc123","votes":0,"voted":false}  主持人開始 / 結束講師投票（沒有 speaker = 結束）
+//   {"t":"vote","ok":true,"code":"voted","votes":23,"voted":true,...}           投票結果
+//   {"t":"votes","turn":"abc123","votes":24}              票數更新（最多每秒一次）
 //   {"t":"bye","code":"ended","message":"..."}            場次結束 / 連結失效 / 被封鎖
 
 public struct AvatarSpec: Codable, Equatable {
@@ -51,13 +55,16 @@ public struct ClientMessage: Codable, Equatable {
     public var profile: ViewerProfile?
     public var id: String?
     public var text: String?
+    /// 投票的講師時段
+    public var turn: String?
 
-    public init(t: String, clientId: String? = nil, profile: ViewerProfile? = nil, id: String? = nil, text: String? = nil) {
+    public init(t: String, clientId: String? = nil, profile: ViewerProfile? = nil, id: String? = nil, text: String? = nil, turn: String? = nil) {
         self.t = t
         self.clientId = clientId
         self.profile = profile
         self.id = id
         self.text = text
+        self.turn = turn
     }
 
     public static func decode(_ text: String) -> ClientMessage? {
@@ -80,11 +87,17 @@ public struct ServerMessage: Codable, Equatable {
     public var nickname: String?
     /// 大頭貼與暱稱的顯示大小（standard / large / extraLarge），手機預覽依此呈現
     public var profileSize: String?
+    /// 講師投票：目前的講師、時段、票數、這支手機是否已投
+    public var speaker: String?
+    public var turn: String?
+    public var votes: Int?
+    public var voted: Bool?
 
     public init(
         t: String, id: String? = nil, ok: Bool? = nil, code: String? = nil, state: String? = nil,
         message: String? = nil, retryAfter: Double? = nil, queue: Int? = nil, maxLength: Int? = nil,
-        cooldown: Double? = nil, allowPhoto: Bool? = nil, nickname: String? = nil, profileSize: String? = nil
+        cooldown: Double? = nil, allowPhoto: Bool? = nil, nickname: String? = nil, profileSize: String? = nil,
+        speaker: String? = nil, turn: String? = nil, votes: Int? = nil, voted: Bool? = nil
     ) {
         self.t = t
         self.id = id
@@ -99,6 +112,10 @@ public struct ServerMessage: Codable, Equatable {
         self.allowPhoto = allowPhoto
         self.nickname = nickname
         self.profileSize = profileSize
+        self.speaker = speaker
+        self.turn = turn
+        self.votes = votes
+        self.voted = voted
     }
 
     public func json() -> String {
@@ -124,18 +141,35 @@ public struct HTTPSendPayload: Codable, Equatable {
     }
 }
 
+/// HTTP 備援通道：POST /api/vote
+public struct HTTPVotePayload: Codable, Equatable {
+    public var session: String
+    public var clientId: String?
+    public var turn: String?
+
+    public init(session: String, clientId: String? = nil, turn: String? = nil) {
+        self.session = session
+        self.clientId = clientId
+        self.turn = turn
+    }
+}
+
 /// HTTP 回應（手機網頁直接顯示 `message`）。
 public struct APIResult: Codable, Equatable {
     public var ok: Bool
     public var code: String
     public var message: String
     public var retryAfter: Double?
+    public var votes: Int?
+    public var voted: Bool?
 
-    public init(ok: Bool, code: String, message: String, retryAfter: Double? = nil) {
+    public init(ok: Bool, code: String, message: String, retryAfter: Double? = nil, votes: Int? = nil, voted: Bool? = nil) {
         self.ok = ok
         self.code = code
         self.message = message
         self.retryAfter = retryAfter
+        self.votes = votes
+        self.voted = voted
     }
 }
 
